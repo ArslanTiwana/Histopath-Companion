@@ -1,0 +1,253 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CaseStatus {
+  gross_pending
+  gross_done
+  micro_pending
+  micro_done
+  with_consultant
+  consultant_dx_added
+  report_draft
+  report_approved
+  with_typist
+  needs_confirmation
+  delivered
+}
+
+enum CasePriority {
+  routine
+  urgent
+}
+
+enum StepName {
+  gross
+  micro
+  consultant
+  report
+  typist
+  delivered
+}
+
+enum StepStatus {
+  pending
+  done
+  skipped
+  forced
+}
+
+model Setting {
+  id             Int       @id @default(1)
+  pinHash        String    @map("pin_hash")
+  failedAttempts Int       @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until")
+  aiProvider     String    @default("groq") @map("ai_provider")
+  aiBaseUrl      String?   @map("ai_base_url")
+  modelText      String?   @map("model_text")
+  modelStt       String?   @map("model_stt")
+  overdueDays    Int       @default(2) @map("overdue_days")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+model Batch {
+  id         Int      @id @default(autoincrement())
+  name       String
+  rangeStart String   @map("range_start")
+  rangeEnd   String   @map("range_end")
+  count      Int
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  cases      Case[]
+
+  @@map("batches")
+}
+
+model Case {
+  id              Int              @id @default(autoincrement())
+  caseLabel       String           @unique @map("case_label")
+  batchId         Int?             @map("batch_id")
+  specimenType    String?          @map("specimen_type")
+  priority        CasePriority     @default(routine)
+  status          CaseStatus       @default(gross_pending)
+  incomplete      Boolean          @default(false)
+  locked          Boolean          @default(false)
+  deliveredAt     DateTime?        @map("delivered_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  batch           Batch?           @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  steps           CaseStep[]
+  events          Event[]
+  grossEntry      GrossEntry?
+  microEntry      MicroEntry?
+  consultantEntry ConsultantEntry?
+  report          Report?
+  typistChecks    TypistCheck[]
+  helpSessions    HelpSession[]
+  reminders       Reminder[]
+
+  @@index([status])
+  @@map("cases")
+}
+
+model Reminder {
+  id        Int      @id @default(autoincrement())
+  caseId    Int?     @map("case_id")
+  dueAt     DateTime @map("due_at")
+  text      String
+  done      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  case      Case?    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([dueAt, done])
+  @@map("reminders")
+}
+
+model DaySummary {
+  id        Int      @id @default(autoincrement())
+  day       DateTime @unique @db.Date
+  counts    Json
+  closedAt  DateTime @default(now()) @map("closed_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("day_summaries")
+}
+
+model ConsultantEntry {
+  id           Int      @id @default(autoincrement())
+  caseId       Int      @unique @map("case_id")
+  consultantDx Json     @map("consultant_dx")
+  comparison   Json
+  learnedNote  String?  @map("learned_note")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  case         Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("consultant_entries")
+}
+
+model Report {
+  id         Int       @id @default(autoincrement())
+  caseId     Int       @unique @map("case_id")
+  templateId Int?      @map("template_id")
+  content    Json
+  status     String    @default("draft")
+  approvedAt DateTime? @map("approved_at")
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  case       Case      @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  template   Template? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@map("reports")
+}
+
+model TypistCheck {
+  id             Int      @id @default(autoincrement())
+  caseId         Int      @map("case_id")
+  typedText      String   @map("typed_text")
+  diff           Json
+  result         String
+  overrideReason String?  @map("override_reason")
+  checkedAt      DateTime @default(now()) @map("checked_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  case           Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, checkedAt])
+  @@map("typist_checks")
+}
+
+model MicroEntry {
+  id            Int      @id @default(autoincrement())
+  caseId        Int      @unique @map("case_id")
+  dictation     String
+  differential  Json?
+  ihc           Json?
+  provisionalDx String?  @map("provisional_dx")
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  case          Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("micro_entries")
+}
+
+model HelpSession {
+  id          Int      @id @default(autoincrement())
+  caseId      Int      @map("case_id")
+  contextStep String   @map("context_step")
+  messages    Json
+  addedNote   String?  @map("added_note")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  case        Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, contextStep])
+  @@map("help_sessions")
+}
+
+model GrossEntry {
+  id              Int      @id @default(autoincrement())
+  caseId          Int      @unique @map("case_id")
+  fields          Json
+  transcript      String?
+  descriptionText String   @map("description_text")
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  case            Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("gross_entries")
+}
+
+model Template {
+  id           Int      @id @default(autoincrement())
+  kind         String
+  specimenType String   @map("specimen_type")
+  schema       Json
+  defaultText  String?  @map("default_text")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  reports      Report[]
+
+  @@unique([kind, specimenType])
+  @@map("templates")
+}
+
+model CaseStep {
+  id          Int        @id @default(autoincrement())
+  caseId      Int        @map("case_id")
+  step        StepName
+  status      StepStatus @default(pending)
+  reason      String?
+  completedAt DateTime?  @map("completed_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  case        Case       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, step])
+  @@map("case_steps")
+}
+
+model Event {
+  id      Int      @id @default(autoincrement())
+  caseId  Int?     @map("case_id")
+  type    String
+  payload Json?
+  at      DateTime @default(now())
+  case    Case?    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, at])
+  @@map("events")
+}
