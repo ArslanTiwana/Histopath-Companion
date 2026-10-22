@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import AppNav from "@/app/components/AppNav";
 
 type Template = { id: number; kind: "gross" | "report"; specimenType: string; schema: unknown; defaultText: string | null };
-const blank = { id: undefined as number | undefined, kind: "gross" as const, specimenType: "", schemaText: "{}", defaultText: "" };
+const blank = { id: undefined as number | undefined, kind: "gross" as "gross" | "report", specimenType: "", schemaText: "{}", defaultText: "" };
 
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]); const [form, setForm] = useState(blank); const [review, setReview] = useState(false); const [message, setMessage] = useState("");
