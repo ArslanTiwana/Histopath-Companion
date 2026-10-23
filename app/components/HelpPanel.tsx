@@ -1,5 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
+import { apiFetch } from "@/lib/api-fetch";
+import { runConfirmedAction } from "@/lib/client-actions";
 type Message = { role: "user" | "assistant"; content: string };
 export default function HelpPanel({
   caseId,
@@ -20,25 +22,25 @@ export default function HelpPanel({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [source, setSource] = useState<"tap" | "voice">("tap");
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
-  async function ask(question: string) {
+  async function ask(question: string, nextSource: "tap" | "voice") {
     if (!question.trim()) return;
     setBusy(true);
     setError("");
     setMessages((value) => [...value, { role: "user", content: question }]);
     try {
-      const response = await fetch(`/api/cases/${caseId}/help`, {
+      setSource(nextSource);
+      const result = await apiFetch<{
+        reply?: string;
+        error?: string;
+      }>(`/api/cases/${caseId}/help`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contextStep, message: question, currentText }),
       });
-      const result = (await response.json()) as {
-        reply?: string;
-        error?: string;
-      };
-      if (!response.ok || !result.reply)
-        throw new Error(result.error || "Help is unavailable");
+      if (!result.reply) throw new Error(result.error || "Help is unavailable");
       setMessages((value) => [
         ...value,
         { role: "assistant", content: result.reply! },
@@ -68,17 +70,16 @@ export default function HelpPanel({
           new Blob(chunks.current, { type: media.mimeType || "audio/webm" }),
         );
         try {
-          const response = await fetch("/api/voice/transcribe", {
+          const result = await apiFetch<{
+            transcript?: string;
+            error?: string;
+          }>("/api/voice/transcribe", {
             method: "POST",
             body: form,
           });
-          const result = (await response.json()) as {
-            transcript?: string;
-            error?: string;
-          };
           if (!result.transcript)
             throw new Error(result.error || "I didn't catch that");
-          await ask(result.transcript);
+          await ask(result.transcript, "voice");
         } catch (cause) {
           setError(
             cause instanceof Error ? cause.message : "I didn't catch that",
@@ -96,15 +97,12 @@ export default function HelpPanel({
   }
   async function close(addedNote?: string) {
     if (messages.length)
-      await fetch(`/api/cases/${caseId}/help`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "save",
-          contextStep,
-          messages,
-          addedNote,
-        }),
+      await runConfirmedAction("save_help_session", {
+        caseId: Number(caseId),
+        contextStep,
+        messages,
+        addedNote,
+        source,
       });
     if (addedNote) onAddNote(addedNote);
     onClose();
@@ -148,7 +146,7 @@ export default function HelpPanel({
             event.preventDefault();
             const value = text;
             setText("");
-            void ask(value);
+            void ask(value, "tap");
           }}
           className="help-input"
         >

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { endOfToday, parseReminderDate, startOfToday } from "@/lib/phase6-actions";
+import {
+  endOfToday,
+  parseReminderDate,
+  startOfToday,
+} from "@/lib/phase6-actions";
 
 describe("Phase 6 reminders and daily boundaries", () => {
   const monday = new Date("2026-10-19T14:30:00");

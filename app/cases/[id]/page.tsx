@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import AppNav from "@/app/components/AppNav";
+import { apiFetch } from "@/lib/api-fetch";
 type Case = {
   id: number;
   caseLabel: string;
@@ -17,9 +18,7 @@ type Case = {
 export default function CasePage({ params }: { params: { id: string } }) {
   const [c, setC] = useState<Case | null>(null);
   useEffect(() => {
-    fetch(`/api/cases/${params.id}`)
-      .then((r) => r.json())
-      .then((item: Case) => setC(item));
+    apiFetch<Case>(`/api/cases/${params.id}`).then(setC);
   }, [params.id]);
   if (!c)
     return (

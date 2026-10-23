@@ -8,6 +8,13 @@ import {
 } from "@/src/lib/gross/templates";
 import HelpPanel from "@/app/components/HelpPanel";
 import AppNav from "@/app/components/AppNav";
+import BypassStepModal from "@/app/components/BypassStepModal";
+import { apiFetch } from "@/lib/api-fetch";
+import { runConfirmedAction } from "@/lib/client-actions";
+import {
+  previousGrossForSpecimen,
+  type PreviousGross,
+} from "@/lib/gross-selection";
 
 type GrossData = {
   case: {
@@ -16,10 +23,7 @@ type GrossData = {
     specimenType: string | null;
     status: string;
   };
-  previous: {
-    fields: Record<string, string>;
-    case: { specimenType: string | null };
-  } | null;
+  previous: PreviousGross[];
 };
 export default function GrossPage({ params }: { params: { id: string } }) {
   const [data, setData] = useState<GrossData | null>(null);
@@ -39,38 +43,49 @@ export default function GrossPage({ params }: { params: { id: string } }) {
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   useEffect(() => {
-    fetch(`/api/cases/${params.id}/gross`)
-      .then((response) => response.json())
-      .then((value: GrossData) => {
+    apiFetch<GrossData>(`/api/cases/${params.id}/gross`).then(
+      (value: GrossData) => {
         setData(value);
         setSpecimen(value.case.specimenType || "");
-      });
-    fetch("/api/templates")
-      .then((response) => response.json())
-      .then((templates: { kind: string; specimenType: string; schema: unknown }[]) => {
+      },
+    );
+    apiFetch<{ kind: string; specimenType: string; schema: unknown }[]>(
+      "/api/templates",
+    ).then(
+      (
+        templates: { kind: string; specimenType: string; schema: unknown }[],
+      ) => {
         const managed: Record<string, GrossTemplate> = {};
         for (const item of templates) {
-          if (item.kind !== "gross" || typeof item.schema !== "object" || !item.schema) continue;
+          if (
+            item.kind !== "gross" ||
+            typeof item.schema !== "object" ||
+            !item.schema
+          )
+            continue;
           const value = item.schema as Partial<GrossTemplate>;
           if (Array.isArray(value.fields) && value.fields.length)
-            managed[item.specimenType] = { name: value.name || item.specimenType, fields: value.fields };
+            managed[item.specimenType] = {
+              name: value.name || item.specimenType,
+              fields: value.fields,
+            };
         }
         setManagedTemplates(managed);
-      });
+      },
+    );
   }, [params.id]);
   const template = specimen
-    ? managedTemplates[specimen] || GROSS_TEMPLATES[specimen] || GROSS_TEMPLATES.Other
+    ? managedTemplates[specimen] ||
+      GROSS_TEMPLATES[specimen] ||
+      GROSS_TEMPLATES.Other
     : null;
-  const description = useMemo(
-    () => {
-      if (!specimen || !template) return "";
-      const details = template.fields
-        .filter((field) => fields[field.key]?.trim())
-        .map((field) => `${field.label}: ${fields[field.key].trim()}`);
-      return `${specimen} specimen. ${details.join(". ")}${details.length ? "." : ""}`;
-    },
-    [specimen, fields, template],
-  );
+  const description = useMemo(() => {
+    if (!specimen || !template) return "";
+    const details = template.fields
+      .filter((field) => fields[field.key]?.trim())
+      .map((field) => `${field.label}: ${fields[field.key].trim()}`);
+    return `${specimen} specimen. ${details.join(". ")}${details.length ? "." : ""}`;
+  }, [specimen, fields, template]);
   const specimenTypes = Array.from(
     new Set([...SPECIMEN_TYPES, ...Object.keys(managedTemplates)]),
   );
@@ -122,11 +137,11 @@ export default function GrossPage({ params }: { params: { id: string } }) {
       mode === "review" &&
       !bypass
     ) {
-      void submitSave();
+      void submitSave("voice");
       return;
     }
     if (/^(confirm|yes)$/.test(lower) && bypass) {
-      void submitBypass();
+      void submitBypass("voice");
       return;
     }
     if (/^(cancel|no)$/.test(lower) && bypass) {
@@ -154,14 +169,13 @@ export default function GrossPage({ params }: { params: { id: string } }) {
             "audio",
             new Blob(chunks.current, { type: media.mimeType || "audio/webm" }),
           );
-          const response = await fetch("/api/voice/transcribe", {
+          const result = await apiFetch<{
+            transcript?: string;
+            error?: string;
+          }>("/api/voice/transcribe", {
             method: "POST",
             body: form,
           });
-          const result = (await response.json()) as {
-            transcript?: string;
-            error?: string;
-          };
           if (result.transcript) handleVoice(result.transcript);
           else setError(result.error || "I didn't catch that.");
         } catch {
@@ -182,30 +196,27 @@ export default function GrossPage({ params }: { params: { id: string } }) {
     recorder.current?.stop();
   }
   function copyPrevious() {
-    if (!data?.previous) return;
-    setSpecimen(data.previous.case.specimenType || "Other");
-    setFields(data.previous.fields);
+    const previous = data
+      ? previousGrossForSpecimen(data.previous, specimen)
+      : null;
+    if (!previous) return;
+    setFields(previous.fields);
     setIndex(0);
   }
-  async function submitSave() {
+  async function submitSave(source: "tap" | "voice" = "tap") {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/cases/${params.id}/gross`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "save",
-          specimenType: specimen,
-          fields,
-          descriptionText: description,
-          transcript: Object.values(fields).join(". "),
-          notes,
-          confirmed: true,
-        }),
+      await runConfirmedAction("save_gross", {
+        caseId: Number(params.id),
+        action: "save",
+        specimenType: specimen,
+        fields,
+        descriptionText: description,
+        transcript: Object.values(fields).join(". "),
+        notes,
+        source,
       });
-      const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error);
       window.speechSynthesis?.speak(
         new SpeechSynthesisUtterance(
           "Gross saved. Moving to microscopy pending.",
@@ -217,20 +228,22 @@ export default function GrossPage({ params }: { params: { id: string } }) {
       setBusy(false);
     }
   }
-  async function submitBypass() {
+  async function submitBypass(source: "tap" | "voice" = "tap") {
     if (!bypass || reason.trim().length < 3) {
       setError("A reason is required.");
       return;
     }
     setBusy(true);
-    const response = await fetch(`/api/cases/${params.id}/gross`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: bypass, reason, confirmed: true }),
-    });
-    const result = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      setError(result.error || "Could not continue");
+    try {
+      await runConfirmedAction("bypass_step", {
+        caseId: Number(params.id),
+        step: "gross",
+        mode: bypass,
+        reason,
+        source,
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not continue");
       setBusy(false);
       return;
     }
@@ -280,11 +293,6 @@ export default function GrossPage({ params }: { params: { id: string } }) {
             </button>
           ))}
         </div>
-        {data.previous && (
-          <button className="secondary wide" onClick={copyPrevious}>
-            Same as previous · {data.previous.case.specimenType}
-          </button>
-        )}
         <AppNav active="cases" />
       </main>
     );
@@ -375,7 +383,15 @@ export default function GrossPage({ params }: { params: { id: string } }) {
               </button>
             ))}
           </div>
-          <button className="secondary wide" onClick={() => setMode("review")}>
+          <button
+            className="secondary wide"
+            onClick={() => {
+              setMode("review");
+              window.speechSynthesis?.speak(
+                new SpeechSynthesisUtterance(description),
+              );
+            }}
+          >
             Read back and save
           </button>
         </>
@@ -399,47 +415,36 @@ export default function GrossPage({ params }: { params: { id: string } }) {
             <button
               className="primary"
               disabled={busy || completed < template!.fields.length}
-              onClick={() => void submitSave()}
+              onClick={() => void submitSave("tap")}
             >
               Confirm and save
             </button>
           </div>
         </div>
       )}
-      <div className="bypass-row">
-        <button onClick={() => setBypass("skip")}>Skip gross</button>
-        <button onClick={() => setBypass("force")}>Force complete</button>
-      </div>
-      {bypass && (
-        <div className="modal">
-          <div className="modal-card">
-            <button className="close" onClick={() => setBypass(null)}>
-              ×
-            </button>
-            <div className="eyebrow">INCOMPLETE WILL BE LOGGED</div>
-            <h2>
-              {bypass === "skip" ? "Skip gross?" : "Force complete gross?"}
-            </h2>
-            <label>
-              Reason required
-              <textarea
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                placeholder="Why is this step being bypassed?"
-              />
-            </label>
-            <button
-              className="voice-answer"
-              onClick={() => (busy ? stopVoice() : void startVoice())}
-            >
-              {busy ? "■ Stop" : "🎙 Say confirm or cancel"}
-            </button>
-            <button className="primary" onClick={() => void submitBypass()}>
-              Confirm {bypass}
-            </button>
-          </div>
-        </div>
+      {previousGrossForSpecimen(data.previous, specimen) && (
+        <button className="secondary wide" onClick={copyPrevious}>
+          Same as{" "}
+          {previousGrossForSpecimen(data.previous, specimen)!.case.caseLabel}
+        </button>
       )}
+      <BypassStepModal
+        step="gross"
+        mode={bypass}
+        reason={reason}
+        busy={busy}
+        onModeChange={setBypass}
+        onReasonChange={setReason}
+        onConfirm={() => void submitBypass("tap")}
+        voiceControl={
+          <button
+            className="voice-answer"
+            onClick={() => (busy ? stopVoice() : void startVoice())}
+          >
+            {busy ? "■ Stop" : "🎙 Say confirm or cancel"}
+          </button>
+        }
+      />
       {error && <div className="error">{error}</div>}
       {helpOpen && (
         <HelpPanel

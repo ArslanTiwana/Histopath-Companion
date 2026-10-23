@@ -9,66 +9,17 @@ const messageSchema = z.object({
   message: z.string().trim().min(2).max(4000),
   currentText: z.string().max(8000).optional(),
 });
-const saveSchema = z.object({
-  action: z.literal("save"),
-  contextStep: z.enum(["gross", "micro"]),
-  messages: z
-    .array(
-      z.object({ role: z.enum(["user", "assistant"]), content: z.string() }),
-    )
-    .min(1),
-  addedNote: z.string().optional(),
-});
+import { parseIdParam } from "@/lib/validation";
 export async function POST(
   request: Request,
   { params }: { params: { id: string } },
 ) {
   if (!(await isAuthenticated()))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const body: unknown = await request.json();
-  const isSave =
-    typeof body === "object" &&
-    body !== null &&
-    "action" in body &&
-    body.action === "save";
-  if (isSave) {
-    const parsed = saveSchema.safeParse(body);
-    if (!parsed.success)
-      return NextResponse.json(
-        { error: "Invalid help session" },
-        { status: 400 },
-      );
-    const savedText = [
-      ...parsed.data.messages.map((message) => message.content),
-      parsed.data.addedNote || "",
-    ].join(" ");
-    if (containsPatientIdentifier(savedText))
-      return NextResponse.json(
-        { error: "Remove patient-identifying details before saving help." },
-        { status: 400 },
-      );
-    await prisma.$transaction([
-      prisma.helpSession.create({
-        data: {
-          caseId: Number(params.id),
-          contextStep: parsed.data.contextStep,
-          messages: parsed.data.messages,
-          addedNote: parsed.data.addedNote || null,
-        },
-      }),
-      prisma.event.create({
-        data: {
-          caseId: Number(params.id),
-          type: "help_session_saved",
-          payload: {
-            contextStep: parsed.data.contextStep,
-            addedToNotes: Boolean(parsed.data.addedNote),
-          },
-        },
-      }),
-    ]);
-    return NextResponse.json({ ok: true });
-  }
+  const caseId = parseIdParam(params.id);
+  if (!caseId)
+    return NextResponse.json({ error: "Invalid case ID" }, { status: 400 });
+  const body: unknown = await request.json().catch(() => null);
   const parsed = messageSchema.safeParse(body);
   if (!parsed.success)
     return NextResponse.json(
@@ -84,7 +35,7 @@ export async function POST(
       { status: 400 },
     );
   const item = await prisma.case.findUnique({
-    where: { id: Number(params.id) },
+    where: { id: caseId },
     select: { specimenType: true },
   });
   if (!item)

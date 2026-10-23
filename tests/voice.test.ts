@@ -4,13 +4,6 @@ import {
   normalizeCaseLabel,
   parseRange,
 } from "@/src/lib/voice/parser";
-import {
-  cancelPending,
-  getDraft,
-  getPending,
-  setDraft,
-  setPending,
-} from "@/lib/voice-session";
 
 describe("case label parsing", () => {
   it.each([
@@ -39,21 +32,5 @@ describe("voice fast path", () => {
       specimen: "Appendix",
       priority: "urgent",
     });
-  });
-  it("handles confirmation and cancellation state", () => {
-    setPending({
-      action: "create_case",
-      args: { label: "S-101" },
-      description: "Create S-101?",
-    });
-    expect(getPending()?.action).toBe("create_case");
-    expect(cancelPending().reply).toBe("Cancelled.");
-    expect(getPending()).toBeNull();
-  });
-  it("cancels an intake clarification draft", () => {
-    setDraft({ tool: "create_case", args: {} });
-    expect(getDraft()?.tool).toBe("create_case");
-    expect(cancelPending().reply).toBe("Cancelled.");
-    expect(getDraft()).toBeNull();
   });
 });

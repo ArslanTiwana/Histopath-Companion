@@ -4,6 +4,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { chat, AiBusyError } from "@/src/lib/ai";
 import { containsPatientIdentifier } from "@/src/lib/privacy";
+import { parseIdParam } from "@/lib/validation";
 const input = z.object({ findings: z.string().trim().min(3).max(6000) });
 const output = z.object({
   differential: z.array(z.string()).max(6),
@@ -15,7 +16,10 @@ export async function POST(
 ) {
   if (!(await isAuthenticated()))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const parsed = input.safeParse(await request.json());
+  const caseId = parseIdParam(params.id);
+  if (!caseId)
+    return NextResponse.json({ error: "Invalid case ID" }, { status: 400 });
+  const parsed = input.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return NextResponse.json(
       { error: "Microscopy findings are required" },
@@ -30,7 +34,7 @@ export async function POST(
       { status: 400 },
     );
   const item = await prisma.case.findUnique({
-    where: { id: Number(params.id) },
+    where: { id: caseId },
     select: { specimenType: true },
   });
   if (!item)

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
+import { apiFetch } from "@/lib/api-fetch";
 
 type Row = {
   field: string;
@@ -22,9 +23,7 @@ type Entry = {
 export default function LearnedPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   useEffect(() => {
-    fetch("/api/learned")
-      .then((r) => r.json())
-      .then(setEntries);
+    apiFetch<Entry[]>("/api/learned").then(setEntries);
   }, []);
   const pattern = useMemo(() => {
     const counts: Record<string, number> = {};

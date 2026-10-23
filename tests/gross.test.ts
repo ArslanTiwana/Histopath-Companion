@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bypassGrossSchema, saveGrossSchema } from "@/lib/gross-actions";
+import { saveGrossSchema } from "@/lib/gross-actions";
+import { bypassStepSchema } from "@/lib/bypass-actions";
 import {
   buildGrossDescription,
   GROSS_TEMPLATES,
@@ -38,10 +39,11 @@ describe("gross confirmation validation", () => {
 
   it("requires a reason to skip or force", () => {
     expect(
-      bypassGrossSchema.safeParse({
-        action: "skip",
+      bypassStepSchema.safeParse({
+        caseId: 1,
+        step: "gross",
+        mode: "skip",
         reason: "",
-        confirmed: true,
       }).success,
     ).toBe(false);
   });

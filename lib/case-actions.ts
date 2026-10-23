@@ -18,6 +18,7 @@ export async function createSingleCase(
   label: string,
   specimen?: string,
   priority: "routine" | "urgent" = "routine",
+  source: "tap" | "voice" = "tap",
 ) {
   return prisma.case.create({
     data: {
@@ -26,12 +27,17 @@ export async function createSingleCase(
       priority,
       steps: { create: steps.map((step) => ({ step })) },
       events: {
-        create: { type: "case_created", payload: { source: "voice" } },
+        create: { type: "case_created", payload: { source } },
       },
     },
   });
 }
-export async function createBatch(name: string, start: string, end: string) {
+export async function createBatch(
+  name: string,
+  start: string,
+  end: string,
+  source: "tap" | "voice" = "tap",
+) {
   const labels = rangeLabels(start, end);
   const existing = await prisma.case.findMany({
     where: { caseLabel: { in: labels } },
@@ -52,7 +58,7 @@ export async function createBatch(name: string, start: string, end: string) {
           caseLabel,
           steps: { create: steps.map((step) => ({ step })) },
           events: {
-            create: { type: "case_created", payload: { source: "voice" } },
+            create: { type: "case_created", payload: { source } },
           },
         })),
       },

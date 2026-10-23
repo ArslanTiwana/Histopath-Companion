@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
+import { apiFetch } from "@/lib/api-fetch";
+import { runConfirmedAction } from "@/lib/client-actions";
+import { compactLocalDate, localDateKey } from "@/lib/local-date";
 
 type Item = { id: number; caseLabel: string };
 type Bundle = {
@@ -20,22 +23,24 @@ export default function TypistSendPage() {
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    fetch("/api/typist/send")
-      .then((r) => r.json())
-      .then((data: Item[]) => {
-        setItems(data);
-        setSelected(data.map((item) => item.id));
-      });
-  }, []);
-  async function send() {
-    const response = await fetch("/api/typist/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ caseIds: selected, confirmed: true }),
+    apiFetch<Item[]>("/api/typist/send").then((data: Item[]) => {
+      setItems(data);
+      setSelected(data.map((item) => item.id));
     });
-    const result = (await response.json()) as Bundle;
-    if (!response.ok) return setError(result.error || "Could not prepare file");
-    setBundle(result);
+  }, []);
+  async function send(source: "tap" | "voice" = "tap") {
+    try {
+      const response = await runConfirmedAction<Bundle>("send_to_typist", {
+        caseIds: selected,
+        localDate: localDateKey(),
+        source,
+      });
+      setBundle(response.result);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not prepare file",
+      );
+    }
   }
   function makeFile() {
     if (!bundle) return;
@@ -82,7 +87,7 @@ export default function TypistSendPage() {
               <span>✓</span>
               <b>File</b>
               <strong>
-                Typist_{new Date().toISOString().slice(5, 10).replace("-", "")}
+                Typist_{compactLocalDate()}
                 .docx
               </strong>
             </div>
@@ -147,7 +152,7 @@ export default function TypistSendPage() {
         <DictationButton
           label="Say send all approved to typist"
           onTranscript={(text) => {
-            if (/confirm/i.test(text) && review) void send();
+            if (/confirm/i.test(text) && review) void send("voice");
             else if (/send.*typist/i.test(text)) setReview(true);
             else setError("Say send all approved to typist, then confirm.");
           }}

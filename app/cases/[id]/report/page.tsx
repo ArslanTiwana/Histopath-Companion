@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
+import { apiFetch } from "@/lib/api-fetch";
+import { runConfirmedAction } from "@/lib/client-actions";
 
 type Content = Record<string, string>;
 type Data = {
@@ -11,7 +13,12 @@ type Data = {
   caseLabel: string;
   specimenType: string | null;
   status: string;
-  report: { content: Content; status: string } | null;
+  report: {
+    content: Content;
+    status: string;
+    version: number;
+    readBackVersion: number | null;
+  } | null;
 };
 const labels: Record<string, string> = {
   specimen: "Specimen",
@@ -31,54 +38,81 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function load() {
-    const response = await fetch(`/api/cases/${params.id}/report`);
-    const data = (await response.json()) as Data;
+  const load = useCallback(async () => {
+    const data = await apiFetch<Data>(`/api/cases/${params.id}/report`);
     setItem(data);
     setContent(data.report?.content || {});
-  }
+  }, [params.id]);
   useEffect(() => {
     void load();
-  }, [params.id]);
-  function readBack() {
+  }, [load]);
+  async function readBack(source: "tap" | "voice" = "tap") {
     const text = Object.entries(content)
       .map(([key, value]) => `${labels[key] || key}. ${value}`)
       .join(". ");
-    window.speechSynthesis?.speak(new SpeechSynthesisUtterance(text));
-  }
-  async function generate() {
     setBusy(true);
     setError("");
-    const response = await fetch(`/api/cases/${params.id}/report`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "generate", confirmed: true }),
-    });
-    const result = (await response.json()) as { error?: string };
-    setBusy(false);
-    if (!response.ok)
-      return setError(result.error || "Could not generate report");
-    await load();
-  }
-  async function approve() {
-    setBusy(true);
-    setError("");
-    const response = await fetch(`/api/cases/${params.id}/report`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "approve", content, confirmed: true }),
-    });
-    const result = (await response.json()) as { error?: string };
-    if (!response.ok) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        if (!window.speechSynthesis)
+          return reject(new Error("Speech read-back is unavailable"));
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.onend = () => resolve();
+        utterance.onerror = () => reject(new Error("Speech read-back failed"));
+        window.speechSynthesis.speak(utterance);
+      });
+      await runConfirmedAction("read_report", {
+        caseId: Number(params.id),
+        content,
+        source,
+      });
+      await load();
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not read report",
+      );
+    } finally {
       setBusy(false);
-      return setError(result.error || "Could not approve report");
+    }
+  }
+  async function generate(source: "tap" | "voice" = "tap") {
+    setBusy(true);
+    setError("");
+    try {
+      await runConfirmedAction("generate_report", {
+        caseId: Number(params.id),
+        source,
+      });
+      await load();
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not generate report",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function approve(source: "tap" | "voice" = "tap") {
+    setBusy(true);
+    setError("");
+    try {
+      await runConfirmedAction("approve_report", {
+        caseId: Number(params.id),
+        content,
+        source,
+      });
+    } catch (cause) {
+      setBusy(false);
+      return setError(
+        cause instanceof Error ? cause.message : "Could not approve report",
+      );
     }
     window.location.href = `/cases/${params.id}`;
   }
   function voiceAction(text: string) {
     const command = text.toLowerCase();
-    if (command.includes("read")) readBack();
-    else if (command.includes("approve")) void approve();
+    if (command.includes("read")) void readBack("voice");
+    else if (command.includes("approve")) void approve("voice");
     else if (command.includes("edit")) setEditing(true);
     else setError("Say read it back, edit, or approve.");
   }
@@ -146,7 +180,11 @@ export default function ReportPage({ params }: { params: { id: string } }) {
       <p className="form-note">
         Built from the consultant diagnosis. Read back before approving.
       </p>
-      <button className="secondary wide" onClick={readBack}>
+      <button
+        className="secondary wide"
+        disabled={busy}
+        onClick={() => void readBack("tap")}
+      >
         🔊 Read it back
       </button>
       <div className="gross-actions">

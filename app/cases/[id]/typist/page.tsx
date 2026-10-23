@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
+import { apiFetch } from "@/lib/api-fetch";
+import { runConfirmedAction } from "@/lib/client-actions";
 
 type DiffRow = {
   field: string;
@@ -18,7 +20,11 @@ type Data = {
   caseLabel: string;
   status: string;
   report: { content: Record<string, string> } | null;
-  typistChecks: { diff: DiffRow[]; result: string }[];
+  typistChecks: {
+    diff: DiffRow[];
+    result: string;
+    corrections: string[] | null;
+  }[];
 };
 
 export default function TypistPage({ params }: { params: { id: string } }) {
@@ -28,51 +34,55 @@ export default function TypistPage({ params }: { params: { id: string } }) {
   const [diff, setDiff] = useState<DiffRow[]>([]);
   const [overrideReason, setOverrideReason] = useState("");
   const [error, setError] = useState("");
-  async function load() {
-    const data = (await (
-      await fetch(`/api/cases/${params.id}/typist`)
-    ).json()) as Data;
+  const load = useCallback(async () => {
+    const data = await apiFetch<Data>(`/api/cases/${params.id}/typist`);
     setItem(data);
-    if (data.typistChecks[0]) setDiff(data.typistChecks[0].diff);
-  }
+    const latest = data.typistChecks[0];
+    if (latest && latest.result !== "returned") setDiff(latest.diff);
+    else {
+      setDiff([]);
+      setTypedText("");
+      setReview(false);
+    }
+  }, [params.id]);
   useEffect(() => {
     void load();
-  }, [params.id]);
-  async function action(body: Record<string, unknown>) {
+  }, [load]);
+  async function action(
+    actionName: string,
+    args: Record<string, unknown>,
+    source: "tap" | "voice" = "tap",
+  ) {
     setError("");
-    const response = await fetch(`/api/cases/${params.id}/typist`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const result = (await response.json()) as {
-      diff?: DiffRow[];
-      error?: string;
-    };
-    if (!response.ok) {
-      setError(result.error || "Typist action failed");
+    try {
+      const response = await runConfirmedAction<{ diff?: DiffRow[] }>(
+        actionName,
+        { caseId: Number(params.id), ...args, source },
+      );
+      if (response.result.diff) setDiff(response.result.diff);
+      await load();
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Typist action failed");
       return false;
     }
-    if (result.diff) setDiff(result.diff);
-    await load();
-    return true;
   }
-  async function deliver(reason?: string) {
+  async function deliver(reason?: string, source: "tap" | "voice" = "tap") {
     if (
       await action(
-        reason
-          ? { action: "override", reason, confirmed: true }
-          : { action: "deliver", confirmed: true },
+        reason ? "override_delivery" : "deliver_case",
+        reason ? { reason } : {},
+        source,
       )
     )
       window.location.href = `/cases/${params.id}/delivered`;
   }
-  async function sendBack() {
-    const sent = await action({
-      action: "send_back",
-      fields: differences.map((row) => row.label),
-      confirmed: true,
-    });
+  async function sendBack(source: "tap" | "voice" = "tap") {
+    const sent = await action(
+      "send_back_typist",
+      { fields: differences.map((row) => row.label) },
+      source,
+    );
     if (sent) {
       setDiff([]);
       setTypedText("");
@@ -81,13 +91,10 @@ export default function TypistPage({ params }: { params: { id: string } }) {
   }
   function voice(text: string) {
     const lower = text.toLowerCase();
-    if (lower.includes("confirm") || lower.includes("deliver")) void deliver();
+    if (lower.includes("confirm") || lower.includes("deliver"))
+      void deliver(undefined, "voice");
     else if (lower.includes("send back") && diff.some((row) => !row.matches))
-      void action({
-        action: "send_back",
-        fields: diff.filter((row) => !row.matches).map((row) => row.label),
-        confirmed: true,
-      });
+      void sendBack("voice");
     else setTypedText((current) => (current ? `${current}\n${text}` : text));
   }
   if (!item) return <main className="app-shell">Loading…</main>;
@@ -118,9 +125,7 @@ export default function TypistPage({ params }: { params: { id: string } }) {
                 </button>
                 <button
                   className="primary"
-                  onClick={() =>
-                    void action({ action: "check", typedText, confirmed: true })
-                  }
+                  onClick={() => void action("check_typist", { typedText })}
                 >
                   Confirm and compare
                 </button>
@@ -149,7 +154,12 @@ export default function TypistPage({ params }: { params: { id: string } }) {
               <button
                 className="primary wide"
                 disabled={typedText.trim().length < 10}
-                onClick={() => setReview(true)}
+                onClick={() => {
+                  setReview(true);
+                  window.speechSynthesis?.speak(
+                    new SpeechSynthesisUtterance(typedText),
+                  );
+                }}
               >
                 Read back before comparing
               </button>

@@ -1,13 +1,43 @@
 import bcrypt from "bcryptjs";
+import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { prisma } from "./db";
-const COOKIE = "histopath_session";
-const SESSION_VALUE = "authenticated";
+import { isSessionId, SESSION_COOKIE } from "./session";
 export async function isSetup() {
   return Boolean(await prisma.setting.findUnique({ where: { id: 1 } }));
 }
 export async function isAuthenticated() {
-  return (await cookies()).get(COOKIE)?.value === SESSION_VALUE;
+  const value = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!isSessionId(value)) return false;
+  const session = await prisma.authSession.findUnique({
+    where: { id: value },
+    select: { expiresAt: true },
+  });
+  return Boolean(session && session.expiresAt > new Date());
+}
+export async function getSessionId() {
+  const value = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!isSessionId(value)) throw new Error("Unauthorized");
+  const session = await prisma.authSession.findUnique({
+    where: { id: value },
+    select: { expiresAt: true },
+  });
+  if (!session || session.expiresAt <= new Date())
+    throw new Error("Unauthorized");
+  return value;
+}
+export async function createSession() {
+  const sessionId = randomUUID();
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000);
+  await prisma.authSession.create({ data: { id: sessionId, expiresAt } });
+  (await cookies()).set(SESSION_COOKIE, sessionId, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 60 * 60 * 12,
+    path: "/",
+  });
+  return sessionId;
 }
 export async function setPin(pin: string) {
   const hash = await bcrypt.hash(pin, 12);
@@ -28,13 +58,7 @@ export async function verifyPin(pin: string) {
       where: { id: 1 },
       data: { failedAttempts: 0, lockedUntil: null },
     });
-    (await cookies()).set(COOKIE, SESSION_VALUE, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 60 * 60 * 12,
-      path: "/",
-    });
+    await createSession();
     return { ok: true };
   }
   const attempts = setting.failedAttempts + 1;

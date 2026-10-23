@@ -1,8 +1,18 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import VoiceBar from "./components/VoiceBar";
 import AppNav from "./components/AppNav";
+import { apiFetch } from "@/lib/api-fetch";
+import {
+  cancelAction,
+  confirmAction,
+  prepareAction,
+  runConfirmedAction,
+  type PendingActionResponse,
+} from "@/lib/client-actions";
+import { localDateKey } from "@/lib/local-date";
+import { nextGrossCase, readyConsultantCaseIds } from "@/lib/worklist";
 type Case = {
   id: number;
   caseLabel: string;
@@ -10,11 +20,10 @@ type Case = {
   priority: "routine" | "urgent";
   status: string;
   incomplete: boolean;
-  batch?: { name: string } | null;
+  batch?: { id: number; name: string } | null;
 };
 const labels: Record<string, string> = {
   gross_pending: "Gross",
-  gross_done: "Micro",
   micro_pending: "Micro",
   micro_done: "Consultant",
   with_consultant: "Consultant",
@@ -30,28 +39,26 @@ function PinGate({ onReady }: { onReady: () => void }) {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
-    fetch("/api/auth")
-      .then((r) => r.json())
-      .then((x) => {
-        setSetup(x.setup);
-        if (x.authenticated) onReady();
-      });
-  }, []);
+    apiFetch<{ setup: boolean; authenticated: boolean }>("/api/auth", {
+      redirectOn401: false,
+    }).then((x) => {
+      setSetup(x.setup);
+      if (x.authenticated) onReady();
+    });
+  }, [onReady]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    const r = await fetch("/api/auth", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pin, setup }),
-    });
-    const x = await r.json();
-    if (r.ok) onReady();
-    else
-      setError(
-        x.lockedUntil
-          ? "Locked for 5 minutes"
-          : x.error || `Incorrect PIN. ${5 - (x.attempts || 0)} attempts left.`,
-      );
+    try {
+      await apiFetch<{ ok: boolean }>("/api/auth", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pin, setup }),
+        redirectOn401: false,
+      });
+      onReady();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not unlock");
+    }
   }
   return (
     <main className="pin-shell">
@@ -60,7 +67,7 @@ function PinGate({ onReady }: { onReady: () => void }) {
         <h1>{setup ? "Set your private PIN" : "Welcome back"}</h1>
         <p>
           {setup
-            ? "Choose a four digit PIN. It stays on this device."
+            ? "Choose a four digit PIN. Its secure hash is stored on the server."
             : "Enter your PIN to open today's worklist."}
         </p>
         <form onSubmit={submit}>
@@ -88,9 +95,16 @@ function Dashboard() {
   const [message, setMessage] = useState("");
   const [consultantOpen, setConsultantOpen] = useState(false);
   const [selectedConsultant, setSelectedConsultant] = useState<number[]>([]);
+  const [intakePending, setIntakePending] =
+    useState<PendingActionResponse | null>(null);
   async function load() {
-    const r = await fetch("/api/cases");
-    if (r.ok) setCases(await r.json());
+    try {
+      setCases(await apiFetch<Case[]>("/api/cases"));
+    } catch (cause) {
+      setMessage(
+        cause instanceof Error ? cause.message : "Could not load cases",
+      );
+    }
   }
   useEffect(() => {
     load();
@@ -116,72 +130,94 @@ function Dashboard() {
       ),
     [cases],
   );
+  const activeBatch =
+    filter === "batch" ? cases.find((item) => item.batch)?.batch || null : null;
   const shown = cases.filter(
     (c) =>
       filter === "all" ||
       (filter === "pending" && c.status !== "delivered") ||
       (filter === "incomplete" && c.incomplete) ||
-      (filter === "batch" && c.batch) ||
+      (filter === "batch" && c.batch?.id === activeBatch?.id) ||
       (filter === "single" && !c.batch),
   );
+  const activeBatchCount = activeBatch
+    ? cases.filter((item) => item.batch?.id === activeBatch.id).length
+    : 0;
   async function create(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.currentTarget));
-    const body =
-      showNew === "batch"
-        ? { mode: "batch", name: data.name, start: data.start, end: data.end }
-        : {
-            mode: "single",
-            caseLabel: data.caseLabel,
-            specimenType: data.specimenType,
-            priority: data.priority,
-          };
-    const r = await fetch("/api/cases", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const x = await r.json();
-    if (!r.ok) setMessage(x.error);
-    else {
+    try {
+      const pending = await prepareAction(
+        showNew === "batch" ? "create_batch" : "create_case",
+        showNew === "batch"
+          ? {
+              name:
+                String(data.name || "").trim() ||
+                `Batch ${new Date().toLocaleDateString()}`,
+              start: String(data.start || "").toUpperCase(),
+              end: String(data.end || "").toUpperCase(),
+              source: "tap",
+            }
+          : {
+              caseLabel: String(data.caseLabel || "").toUpperCase(),
+              specimenType: String(data.specimenType || "").trim() || undefined,
+              priority: data.priority,
+              source: "tap",
+            },
+      );
+      setIntakePending(pending);
+    } catch (cause) {
+      setMessage(
+        cause instanceof Error ? cause.message : "Could not prepare cases",
+      );
+    }
+  }
+  async function confirmIntake() {
+    if (!intakePending) return;
+    try {
+      await confirmAction(intakePending.token);
       setMessage("Created");
+      setIntakePending(null);
       setShowNew(null);
-      load();
+      await load();
+    } catch (cause) {
+      setMessage(
+        cause instanceof Error ? cause.message : "Could not create cases",
+      );
     }
   }
   function openConsultant() {
     setMessage("");
-    setSelectedConsultant(cases.map((item) => item.id));
+    setSelectedConsultant(readyConsultantCaseIds(cases));
     setConsultantOpen(true);
   }
   async function sendConsultant() {
-    const response = await fetch("/api/consultant/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ caseIds: selectedConsultant, confirmed: true }),
-    });
-    const result = (await response.json()) as {
-      ready?: string[];
-      notReady?: string[];
-      error?: string;
-    };
-    if (!response.ok) {
-      setMessage(result.error || "Could not send cases");
-      return;
+    try {
+      const response = await runConfirmedAction<{
+        ready: string[];
+        notReady: string[];
+      }>("send_to_consultant", {
+        caseIds: selectedConsultant,
+        source: "tap",
+      });
+      setMessage(
+        `Sent ${response.result.ready.length}; ${response.result.notReady.length} not ready.`,
+      );
+      setConsultantOpen(false);
+      await load();
+    } catch (cause) {
+      setMessage(
+        cause instanceof Error ? cause.message : "Could not send cases",
+      );
     }
-    setMessage(
-      `Sent ${result.ready?.length || 0}; ${result.notReady?.length || 0} not ready.`,
-    );
-    setConsultantOpen(false);
-    await load();
   }
   return (
     <main className="app-shell">
       <header>
         <div>
           <div className="eyebrow">
-            {cases.find((item) => item.batch)?.batch?.name || "TODAY"} ·{" "}
-            {cases.length} cases
+            {activeBatch ? activeBatch.name : "TODAY"} ·{" "}
+            {activeBatch ? activeBatchCount : cases.length} cases
           </div>
           <h1>Worklist</h1>
         </div>
@@ -223,13 +259,12 @@ function Dashboard() {
           ＋ New batch
         </button>
       </div>
-      {cases.find((item) => item.status === "gross_pending") && (
+      {nextGrossCase(shown) && (
         <Link
           className="primary next-gross"
-          href={`/cases/${cases.find((item) => item.status === "gross_pending")!.id}/gross`}
+          href={`/cases/${nextGrossCase(shown)!.id}/gross`}
         >
-          Start next gross ·{" "}
-          {cases.find((item) => item.status === "gross_pending")!.caseLabel}
+          Start next gross · {nextGrossCase(shown)!.caseLabel}
         </Link>
       )}
       {cases.some((item) => item.status === "micro_done") && (
@@ -288,7 +323,11 @@ function Dashboard() {
             <button
               type="button"
               className="close"
-              onClick={() => setShowNew(null)}
+              onClick={() => {
+                if (intakePending) void cancelAction(intakePending.token);
+                setIntakePending(null);
+                setShowNew(null);
+              }}
             >
               ×
             </button>
@@ -296,7 +335,30 @@ function Dashboard() {
               {showNew === "batch" ? "VOICE INTAKE" : "QUICK ADD"}
             </div>
             <h2>{showNew === "batch" ? "New batch" : "Add single case"}</h2>
-            {showNew === "batch" ? (
+            {intakePending ? (
+              <div className="readback">
+                <p>{intakePending.readBackText}</p>
+                <div className="gross-actions">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      void cancelAction(intakePending.token);
+                      setIntakePending(null);
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => void confirmIntake()}
+                  >
+                    Confirm and create
+                  </button>
+                </div>
+              </div>
+            ) : showNew === "batch" ? (
               <>
                 <label>
                   Batch name
@@ -332,14 +394,18 @@ function Dashboard() {
                 </label>
               </>
             )}
-            <p className="form-note">
-              {showNew === "batch"
-                ? "Each case is created as a full, independent case. The batch is only a label for bulk actions."
-                : "No batch needed. This case uses the same steps and statuses as batch cases."}
-            </p>
-            <button className="primary">
-              {showNew === "batch" ? "Create cases" : "Add case"}
-            </button>
+            {!intakePending && (
+              <p className="form-note">
+                {showNew === "batch"
+                  ? "Each case is created as a full, independent case. The batch is only a label for bulk actions."
+                  : "No batch needed. This case uses the same steps and statuses as batch cases."}
+              </p>
+            )}
+            {!intakePending && (
+              <button className="primary">
+                {showNew === "batch" ? "Create cases" : "Add case"}
+              </button>
+            )}
             {message && <div className="error">{message}</div>}
           </form>
         </div>
@@ -429,13 +495,13 @@ function CaseRow({ c }: { c: Case }) {
 }
 export default function Home() {
   const [ready, setReady] = useState(false);
-  function openSession() {
-    const today = new Date().toISOString().slice(0, 10);
+  const openSession = useCallback(() => {
+    const today = localDateKey();
     if (localStorage.getItem("histopath_briefing_seen") !== today) {
       window.location.href = "/briefing";
       return;
     }
     setReady(true);
-  }
+  }, []);
   return ready ? <Dashboard /> : <PinGate onReady={openSession} />;
 }

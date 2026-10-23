@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { apiFetch } from "@/lib/api-fetch";
 type VoiceState = "idle" | "listening" | "transcribing" | "thinking";
 export default function VoiceBar() {
   const [state, setState] = useState<VoiceState>("idle");
@@ -16,7 +17,14 @@ export default function VoiceBar() {
     setState("thinking");
     setTranscript(text);
     try {
-      const response = await fetch("/api/voice/command", {
+      const data = await apiFetch<{
+        reply?: string;
+        error?: string;
+        navigateTo?: string;
+        filter?: string;
+        refresh?: boolean;
+        goBack?: boolean;
+      }>("/api/voice/command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -24,14 +32,6 @@ export default function VoiceBar() {
           context: { screen: "worklist" },
         }),
       });
-      const data = (await response.json()) as {
-        reply?: string;
-        error?: string;
-        navigateTo?: string;
-        filter?: string;
-        refresh?: boolean;
-        goBack?: boolean;
-      };
       const message = data.reply || data.error || "I couldn't complete that.";
       setReply(message);
       speak(message);
@@ -73,14 +73,13 @@ export default function VoiceBar() {
         const form = new FormData();
         form.append("audio", new Blob(chunks.current, { type: "audio/webm" }));
         try {
-          const response = await fetch("/api/voice/transcribe", {
+          const data = await apiFetch<{
+            transcript?: string;
+            error?: string;
+          }>("/api/voice/transcribe", {
             method: "POST",
             body: form,
           });
-          const data = (await response.json()) as {
-            transcript?: string;
-            error?: string;
-          };
           if (!data.transcript?.trim()) {
             setReply("I didn't catch that. Please try again.");
             setState("idle");

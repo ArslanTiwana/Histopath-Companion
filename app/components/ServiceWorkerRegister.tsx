@@ -3,6 +3,9 @@
 import { useEffect } from "react";
 
 export default function ServiceWorkerRegister() {
-  useEffect(() => { if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") void navigator.serviceWorker.register("/sw.js"); }, []);
+  useEffect(() => {
+    if ("serviceWorker" in navigator && process.env.NODE_ENV === "production")
+      void navigator.serviceWorker.register("/sw.js");
+  }, []);
   return null;
 }

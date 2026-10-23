@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "./db";
+import { transitionCase } from "./status";
 
 export const saveMicroSchema = z.object({
   dictation: z.string().trim().min(3),
@@ -13,10 +14,40 @@ export const saveMicroSchema = z.object({
 export async function completeMicro(
   caseId: number,
   input: z.infer<typeof saveMicroSchema>,
+  sendToConsultant = false,
 ) {
   return prisma.$transaction(async (tx) => {
-    const current = await tx.case.findUnique({ where: { id: caseId } });
+    const current = await tx.case.findUnique({
+      where: { id: caseId },
+      include: { microEntry: true },
+    });
     if (!current) throw new Error("Case not found");
+    if (
+      current.microEntry &&
+      ["micro_done", "with_consultant"].includes(current.status)
+    ) {
+      if (sendToConsultant && current.status === "micro_done")
+        await transitionCase(
+          {
+            caseId,
+            from: "micro_done",
+            to: "with_consultant",
+            steps: [{ step: "consultant", status: "pending" }],
+            event: {
+              type: "sent_to_consultant",
+              payload: { confirmed: true },
+            },
+          },
+          tx,
+        );
+      return {
+        entry: current.microEntry,
+        status:
+          sendToConsultant && current.status === "micro_done"
+            ? "with_consultant"
+            : current.status,
+      };
+    }
     if (current.status !== "micro_pending")
       throw new Error("This case is not waiting for microscopy");
     const entry = await tx.microEntry.create({
@@ -29,32 +60,40 @@ export async function completeMicro(
         notes: input.notes || null,
       },
     });
-    await tx.caseStep.update({
-      where: { caseId_step: { caseId, step: "micro" } },
-      data: { status: "done", completedAt: new Date() },
-    });
-    await tx.case.update({
-      where: { id: caseId },
-      data: { status: "micro_done" },
-    });
-    await tx.event.createMany({
-      data: [
-        {
-          caseId,
+    await transitionCase(
+      {
+        caseId,
+        from: "micro_pending",
+        to: "micro_done",
+        steps: [{ step: "micro", status: "done" }],
+        event: {
           type: "micro_saved",
           payload: {
             confirmed: true,
             hasProvisionalDx: Boolean(input.provisionalDx),
           },
         },
+      },
+      tx,
+    );
+    if (sendToConsultant)
+      await transitionCase(
         {
           caseId,
-          type: "status_changed",
-          payload: { from: "micro_pending", to: "micro_done" },
+          from: "micro_done",
+          to: "with_consultant",
+          steps: [{ step: "consultant", status: "pending" }],
+          event: {
+            type: "sent_to_consultant",
+            payload: { confirmed: true },
+          },
         },
-      ],
-    });
-    return entry;
+        tx,
+      );
+    return {
+      entry,
+      status: sendToConsultant ? "with_consultant" : "micro_done",
+    };
   });
 }
 
@@ -67,28 +106,17 @@ export async function sendCasesToConsultant(caseIds: number[]) {
   const ready = cases.filter((item) => item.status === "micro_done");
   const notReady = cases.filter((item) => item.status !== "micro_done");
   if (ready.length) {
-    await prisma.$transaction(
-      ready.flatMap((item) => [
-        prisma.case.update({
-          where: { id: item.id },
-          data: { status: "with_consultant" },
-        }),
-        prisma.event.create({
-          data: {
-            caseId: item.id,
-            type: "sent_to_consultant",
-            payload: { confirmed: true },
-          },
-        }),
-        prisma.event.create({
-          data: {
-            caseId: item.id,
-            type: "status_changed",
-            payload: { from: "micro_done", to: "with_consultant" },
-          },
-        }),
-      ]),
-    );
+    for (const item of ready)
+      await transitionCase({
+        caseId: item.id,
+        from: "micro_done",
+        to: "with_consultant",
+        steps: [{ step: "consultant", status: "pending" }],
+        event: {
+          type: "sent_to_consultant",
+          payload: { confirmed: true },
+        },
+      });
   }
   return {
     ready: ready.map((item) => item.caseLabel),

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import { prisma } from "./db";
-import { changeCaseStatus } from "./status";
+import { transitionCase } from "./status";
 
 export const diagnosisFieldsSchema = z.object({
   diagnosis: z.string().trim().min(2),
@@ -133,21 +133,18 @@ export async function saveConsultantEntry(
         learnedNote: differences.length ? input.learnedNote || null : null,
       },
     });
-    await tx.caseStep.update({
-      where: { caseId_step: { caseId, step: "consultant" } },
-      data: { status: "done", completedAt: new Date() },
-    });
-    await tx.event.create({
-      data: {
+    await transitionCase(
+      {
         caseId,
-        type: "consultant_diagnosis_saved",
-        payload: { confirmed: true, differenceCount: differences.length },
+        from: "with_consultant",
+        to: "consultant_dx_added",
+        steps: [{ step: "consultant", status: "done" }],
+        event: {
+          type: "consultant_diagnosis_saved",
+          payload: { confirmed: true, differenceCount: differences.length },
+        },
+        statusPayload: { differenceCount: differences.length },
       },
-    });
-    await changeCaseStatus(
-      caseId,
-      "consultant_dx_added",
-      { differenceCount: differences.length },
       tx,
     );
     return { entry, comparison, differenceCount: differences.length };
@@ -188,10 +185,47 @@ export async function generateReport(caseId: number) {
       tumourSize: dx.tumourSize || "Not recorded",
     };
     const report = await tx.report.create({ data: { caseId, content } });
-    await tx.event.create({
-      data: { caseId, type: "report_generated", payload: { version: 1 } },
+    await transitionCase(
+      {
+        caseId,
+        from: "consultant_dx_added",
+        to: "report_draft",
+        steps: [{ step: "report", status: "pending" }],
+        event: { type: "report_generated", payload: { version: 1 } },
+      },
+      tx,
+    );
+    return report;
+  });
+}
+
+export async function markReportReadBack(
+  caseId: number,
+  content: Record<string, string>,
+) {
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.case.findUnique({
+      where: { id: caseId },
+      include: { report: true },
     });
-    await changeCaseStatus(caseId, "report_draft", {}, tx);
+    if (!item?.report || item.status !== "report_draft")
+      throw new Error("This report is not ready for read-back");
+    const changed =
+      JSON.stringify(item.report.content) !== JSON.stringify(content);
+    const version = item.report.version + (changed ? 1 : 0);
+    const readBackAt = new Date();
+    const report = await tx.report.update({
+      where: { caseId },
+      data: {
+        content,
+        version,
+        readBackAt,
+        readBackVersion: version,
+      },
+    });
+    await tx.event.create({
+      data: { caseId, type: "report_read_back", payload: { version } },
+    });
     return report;
   });
 }
@@ -201,25 +235,39 @@ export async function approveReport(
   input: z.infer<typeof approveReportSchema>,
 ) {
   return prisma.$transaction(async (tx) => {
-    const item = await tx.case.findUnique({ where: { id: caseId } });
-    if (!item || item.status !== "report_draft")
+    const item = await tx.case.findUnique({
+      where: { id: caseId },
+      include: { report: true },
+    });
+    if (!item?.report || item.status !== "report_draft")
       throw new Error("This report is not ready for approval");
+    if (JSON.stringify(item.report.content) !== JSON.stringify(input.content))
+      throw new Error("Read back the current report version before approving");
+    if (
+      !item.report.readBackAt ||
+      item.report.readBackVersion !== item.report.version
+    )
+      throw new Error("Read back the current report version before approving");
     const report = await tx.report.update({
       where: { caseId },
       data: {
-        content: input.content,
         status: "approved",
         approvedAt: new Date(),
       },
     });
-    await tx.caseStep.update({
-      where: { caseId_step: { caseId, step: "report" } },
-      data: { status: "done", completedAt: new Date() },
-    });
-    await tx.event.create({
-      data: { caseId, type: "report_approved", payload: { confirmed: true } },
-    });
-    await changeCaseStatus(caseId, "report_approved", {}, tx);
+    await transitionCase(
+      {
+        caseId,
+        from: "report_draft",
+        to: "report_approved",
+        steps: [{ step: "report", status: "done" }],
+        event: {
+          type: "report_approved",
+          payload: { confirmed: true, version: item.report.version },
+        },
+      },
+      tx,
+    );
     return report;
   });
 }
@@ -281,7 +329,10 @@ export function compareTypedReport(
   });
 }
 
-export async function sendApprovedReports(caseIds?: number[]) {
+export async function sendApprovedReports(
+  caseIds: number[] | undefined,
+  localDate: string,
+) {
   const cases = await prisma.case.findMany({
     where: {
       status: "report_approved",
@@ -293,14 +344,16 @@ export async function sendApprovedReports(caseIds?: number[]) {
   if (!cases.length) throw new Error("No approved reports are ready");
   await prisma.$transaction(async (tx) => {
     for (const item of cases) {
-      await changeCaseStatus(item.id, "with_typist", {}, tx);
-      await tx.event.create({
-        data: {
+      await transitionCase(
+        {
           caseId: item.id,
-          type: "sent_to_typist",
-          payload: { confirmed: true },
+          from: "report_approved",
+          to: "with_typist",
+          steps: [{ step: "typist", status: "pending" }],
+          event: { type: "sent_to_typist", payload: { confirmed: true } },
         },
-      });
+        tx,
+      );
     }
   });
   const children = cases.flatMap((item, index) => {
@@ -320,7 +373,7 @@ export async function sendApprovedReports(caseIds?: number[]) {
   const file = await Packer.toBuffer(
     new Document({ sections: [{ properties: {}, children }] }),
   );
-  const date = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const date = localDate.replaceAll("-", "");
   return {
     count: cases.length,
     filename: `Typist_${date}.docx`,
@@ -352,18 +405,55 @@ export async function checkTypedReport(
         result: differences.length ? "differences" : "match",
       },
     });
+    if (differences.length)
+      await tx.event.create({
+        data: {
+          caseId,
+          type: "typist_differences_found",
+          payload: { differenceCount: differences.length },
+        },
+      });
+    else
+      await transitionCase(
+        {
+          caseId,
+          from: "with_typist",
+          to: "needs_confirmation",
+          steps: [{ step: "typist", status: "pending" }],
+          event: {
+            type: "typist_check_matched",
+            payload: { differenceCount: 0 },
+          },
+        },
+        tx,
+      );
+    return { check, diff, differenceCount: differences.length };
+  });
+}
+
+export async function sendBackToTypist(caseId: number, fields: string[]) {
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.case.findUnique({
+      where: { id: caseId },
+      include: { typistChecks: { orderBy: { checkedAt: "desc" }, take: 1 } },
+    });
+    if (!item || item.status !== "with_typist")
+      throw new Error("This case is not awaiting typist correction");
+    const latest = item.typistChecks[0];
+    if (!latest || latest.result !== "differences")
+      throw new Error("There is no differing typist check to return");
+    const check = await tx.typistCheck.update({
+      where: { id: latest.id },
+      data: { result: "returned", returnedAt: new Date(), corrections: fields },
+    });
     await tx.event.create({
       data: {
         caseId,
-        type: differences.length
-          ? "typist_differences_found"
-          : "typist_check_matched",
-        payload: { differenceCount: differences.length },
+        type: "returned_to_typist",
+        payload: { fields, checkId: latest.id, confirmed: true },
       },
     });
-    if (!differences.length)
-      await changeCaseStatus(caseId, "needs_confirmation", {}, tx);
-    return { check, diff, differenceCount: differences.length };
+    return check;
   });
 }
 
@@ -379,36 +469,59 @@ export async function deliverCase(caseId: number, overrideReason?: string) {
       item.status === "needs_confirmation" && last?.result === "match";
     if (!canDeliver && !overrideReason?.trim())
       throw new Error("Resolve every difference or provide an override reason");
-    if (!last) throw new Error("Run the typist comparison before delivery");
-    if (!canDeliver && item.status !== "with_typist")
+    if (
+      !canDeliver &&
+      !["with_typist", "needs_confirmation"].includes(item.status)
+    )
       throw new Error("This case is not awaiting typist verification");
-    if (!canDeliver) {
+    if (!canDeliver && last) {
       await tx.typistCheck.update({
         where: { id: last.id },
         data: { result: "override", overrideReason: overrideReason!.trim() },
       });
-      await changeCaseStatus(
-        caseId,
-        "needs_confirmation",
-        { overrideReason: overrideReason!.trim() },
-        tx,
-      );
     }
-    await tx.caseStep.update({
-      where: { caseId_step: { caseId, step: "typist" } },
-      data: { status: "done", completedAt: new Date() },
-    });
-    await tx.caseStep.update({
-      where: { caseId_step: { caseId, step: "delivered" } },
-      data: { status: "done", completedAt: new Date() },
-    });
-    await tx.event.create({
-      data: {
+    return transitionCase(
+      {
         caseId,
-        type: "typist_confirmed",
-        payload: { confirmed: true, overridden: !canDeliver },
+        from: canDeliver ? "needs_confirmation" : item.status,
+        to: "delivered",
+        steps: [
+          { step: "typist", status: "done" },
+          { step: "delivered", status: "done" },
+        ],
+        locked: true,
+        deliveredAt: new Date(),
+        event: {
+          type: "typist_confirmed",
+          payload: {
+            confirmed: true,
+            overridden: !canDeliver,
+            ...(overrideReason
+              ? { overrideReason: overrideReason.trim() }
+              : {}),
+          },
+        },
       },
-    });
-    return changeCaseStatus(caseId, "delivered", { confirmed: true }, tx);
+      tx,
+    );
+  });
+}
+
+export async function unlockCase(caseId: number, reason: string) {
+  const cleanReason = z.string().trim().min(3).max(1000).parse(reason);
+  return transitionCase({
+    caseId,
+    from: "delivered",
+    to: "needs_confirmation",
+    steps: [{ step: "delivered", status: "pending", reason: cleanReason }],
+    locked: false,
+    deliveredAt: null,
+    allowLocked: true,
+    incomplete: true,
+    event: {
+      type: "case_unlocked",
+      payload: { reason: cleanReason, confirmed: true },
+    },
+    statusPayload: { reason: cleanReason, incomplete: true },
   });
 }

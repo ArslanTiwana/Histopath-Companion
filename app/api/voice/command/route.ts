@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { isAuthenticated } from "@/lib/auth";
+import { getSessionId, isAuthenticated } from "@/lib/auth";
 import {
   matchFastPath,
   normalizeCaseLabel,
@@ -8,16 +8,16 @@ import {
 } from "@/src/lib/voice/parser";
 import { runCommand, AiBusyError } from "@/src/lib/ai";
 import { prisma } from "@/lib/db";
-import { rangeLabels } from "@/lib/case-actions";
 import {
-  confirmPending,
-  cancelPending,
-  getPending,
-  setPending,
-  undoLast,
-  getDraft,
-  setDraft,
-} from "@/lib/voice-session";
+  cancelPendingAction,
+  confirmPendingAction,
+  prepareConfirmedAction,
+  undoLastAction,
+} from "@/lib/confirmed-actions";
+import {
+  assertNoPatientIdentifiers,
+  PATIENT_IDENTIFIER_MESSAGE,
+} from "@/src/lib/privacy";
 const input = z.object({
   transcript: z.string().trim(),
   context: z.object({
@@ -25,58 +25,76 @@ const input = z.object({
     caseId: z.number().int().optional(),
   }),
 });
-async function execute(tool: string, args: Record<string, unknown>) {
+async function execute(
+  sessionId: string,
+  tool: string,
+  args: Record<string, unknown>,
+) {
   if (tool === "confirm") {
-    const result = await confirmPending();
-    return { ...result, refresh: "result" in result };
+    const confirmed = await confirmPendingAction(sessionId);
+    return {
+      reply: `Confirmed ${confirmed.action.replaceAll("_", " ")}.`,
+      result: confirmed.result,
+      refresh: true,
+    };
   }
-  if (tool === "cancel") return cancelPending();
-  if (tool === "undo_last") return { ...(await undoLast()), refresh: true };
+  if (tool === "cancel") {
+    const result = await cancelPendingAction(sessionId);
+    return {
+      reply: result.cancelled
+        ? "Cancelled."
+        : "There is nothing waiting for confirmation.",
+    };
+  }
+  if (tool === "undo_last") return undoLastAction(sessionId);
   if (tool === "create_batch") {
     const start =
       typeof args.start === "string" ? normalizeCaseLabel(args.start) : null;
     const end =
       typeof args.end === "string" ? normalizeCaseLabel(args.end) : null;
     if (!start || !end) {
-      setDraft({ tool: "create_batch", args });
       return {
         reply: "What case range should I create, for example S-101 to S-140?",
         needsConfirm: false,
       };
     }
     const range = parseRange(`${start} to ${end}`);
-    setPending({
-      action: "create_batch",
-      args: {
-        name: typeof args.name === "string" ? args.name : "Voice batch",
-        start,
-        end,
-      },
-      description: `Create ${range ? (range.end === range.start ? 1 : Number(range.end.match(/\d+/)![0]) - Number(range.start.match(/\d+/)![0]) + 1) : "the"} cases, ${start} to ${end}?`,
+    const pending = await prepareConfirmedAction(sessionId, "create_batch", {
+      name: typeof args.name === "string" ? args.name : "Voice batch",
+      start,
+      end,
+      source: "voice",
     });
-    return { reply: getPending()!.description, needsConfirm: true };
+    return {
+      reply: pending.readBackText,
+      pendingToken: pending.token,
+      range,
+      needsConfirm: true,
+    };
   }
   if (tool === "create_case") {
     const label =
       typeof args.label === "string" ? normalizeCaseLabel(args.label) : null;
     if (!label) {
-      setDraft({ tool: "create_case", args });
       return {
         reply:
           "Tell me the case label, specimen, and whether it is routine or urgent.",
         needsConfirm: false,
       };
     }
-    setPending({
-      action: "create_case",
-      args: {
-        label,
-        specimen: typeof args.specimen === "string" ? args.specimen : undefined,
-        priority: args.priority === "urgent" ? "urgent" : "routine",
-      },
-      description: `Create ${label}${args.specimen ? `, ${String(args.specimen)}` : ""}, ${args.priority === "urgent" ? "urgent" : "routine"}?`,
+    const pending = await prepareConfirmedAction(sessionId, "create_case", {
+      label,
+      caseLabel: label,
+      specimenType:
+        typeof args.specimen === "string" ? args.specimen : undefined,
+      priority: args.priority === "urgent" ? "urgent" : "routine",
+      source: "voice",
     });
-    return { reply: getPending()!.description, needsConfirm: true };
+    return {
+      reply: pending.readBackText,
+      pendingToken: pending.token,
+      needsConfirm: true,
+    };
   }
   if (tool === "send_to_consultant") {
     const start =
@@ -88,21 +106,31 @@ async function execute(tool: string, args: Record<string, unknown>) {
         reply: "Which case range should I send to the consultant?",
         needsConfirm: false,
       };
-    const labels = rangeLabels(start, end);
+    const first = Number(start.match(/\d+/)?.[0]);
+    const last = Number(end.match(/\d+/)?.[0]);
+    if (!Number.isInteger(first) || !Number.isInteger(last) || last < first)
+      return { reply: "Use a valid case range.", needsConfirm: false };
+    const labels = Array.from(
+      { length: last - first + 1 },
+      (_, index) => `S-${first + index}`,
+    );
     const selected = await prisma.case.findMany({
       where: { caseLabel: { in: labels } },
       select: { id: true, status: true },
     });
-    const ready = selected.filter(
-      (item) => item.status === "micro_done",
-    ).length;
-    const notReady = selected.length - ready;
-    setPending({
-      action: "send_to_consultant",
-      args: { caseIds: selected.map((item) => item.id) },
-      description: `Send ${ready} ready cases to the consultant? ${notReady} selected cases are not ready.`,
-    });
-    return { reply: getPending()!.description, needsConfirm: true };
+    const pending = await prepareConfirmedAction(
+      sessionId,
+      "send_to_consultant",
+      {
+        caseIds: selected.map((item) => item.id),
+        source: "voice",
+      },
+    );
+    return {
+      reply: pending.readBackText,
+      pendingToken: pending.token,
+      needsConfirm: true,
+    };
   }
   if (tool === "open_worklist")
     return {
@@ -206,7 +234,7 @@ async function execute(tool: string, args: Record<string, unknown>) {
 export async function POST(request: Request) {
   if (!(await isAuthenticated()))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const parsed = input.safeParse(await request.json());
+  const parsed = input.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return NextResponse.json(
       { error: "Transcript and screen context are required" },
@@ -217,15 +245,15 @@ export async function POST(request: Request) {
       reply: "I didn't catch that. Please try again.",
       needsConfirm: false,
     });
-  let command = matchFastPath(parsed.data.transcript);
-  const draft = getDraft();
-  if (!command && draft) {
-    const continued = matchFastPath(
-      `${draft.tool === "create_case" ? "create case" : "create batch"} ${parsed.data.transcript}`,
+  try {
+    assertNoPatientIdentifiers(parsed.data.transcript);
+  } catch {
+    return NextResponse.json(
+      { error: PATIENT_IDENTIFIER_MESSAGE },
+      { status: 400 },
     );
-    if (continued)
-      command = { ...continued, args: { ...draft.args, ...continued.args } };
   }
+  let command = matchFastPath(parsed.data.transcript);
   try {
     if (!command) {
       const routed = await runCommand(
@@ -235,7 +263,11 @@ export async function POST(request: Request) {
       if (!("tool" in routed)) return NextResponse.json(routed);
       command = routed;
     }
-    const result = await execute(command.tool, command.args);
+    const result = await execute(
+      await getSessionId(),
+      command.tool,
+      command.args,
+    );
     return NextResponse.json({
       ...command,
       ...result,

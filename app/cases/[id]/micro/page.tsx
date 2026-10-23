@@ -3,6 +3,9 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import HelpPanel from "@/app/components/HelpPanel";
 import AppNav from "@/app/components/AppNav";
+import BypassStepModal from "@/app/components/BypassStepModal";
+import { apiFetch } from "@/lib/api-fetch";
+import { runConfirmedAction } from "@/lib/client-actions";
 type CaseData = {
   id: number;
   caseLabel: string;
@@ -21,12 +24,12 @@ export default function MicroPage({ params }: { params: { id: string } }) {
   const [review, setReview] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [error, setError] = useState("");
+  const [bypass, setBypass] = useState<"skip" | "force" | null>(null);
+  const [reason, setReason] = useState("");
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   useEffect(() => {
-    fetch(`/api/cases/${params.id}/micro`)
-      .then((response) => response.json())
-      .then(setItem);
+    apiFetch<CaseData>(`/api/cases/${params.id}/micro`).then(setItem);
   }, [params.id]);
   async function startVoice() {
     try {
@@ -47,19 +50,38 @@ export default function MicroPage({ params }: { params: { id: string } }) {
           new Blob(chunks.current, { type: media.mimeType || "audio/webm" }),
         );
         try {
-          const response = await fetch("/api/voice/transcribe", {
+          const result = await apiFetch<{
+            transcript?: string;
+            error?: string;
+          }>("/api/voice/transcribe", {
             method: "POST",
             body: form,
           });
-          const result = (await response.json()) as {
-            transcript?: string;
-            error?: string;
-          };
           if (!result.transcript)
             throw new Error(result.error || "I didn't catch that");
           const spoken = result.transcript.trim();
-          if (/^(save|confirm|confirm and save)$/i.test(spoken) && review)
-            void save();
+          const skip = spoken.match(
+            /^skip (?:micro|microscopy)(?: because)?\s+(.+)/i,
+          );
+          const force = spoken.match(
+            /^force (?:complete )?(?:micro|microscopy)(?: because)?\s+(.+)/i,
+          );
+          if (skip) {
+            setBypass("skip");
+            setReason(skip[1]);
+          } else if (force) {
+            setBypass("force");
+            setReason(force[1]);
+          } else if (/^(confirm|yes)$/i.test(spoken) && bypass)
+            void submitBypass("voice");
+          else if (/^(cancel|no)$/i.test(spoken) && bypass) {
+            setBypass(null);
+            setReason("");
+          } else if (
+            /^(save|confirm|confirm and save)$/i.test(spoken) &&
+            review
+          )
+            void save(false, "voice");
           else
             setDictation((current) =>
               current ? `${current} ${spoken}` : spoken,
@@ -83,17 +105,15 @@ export default function MicroPage({ params }: { params: { id: string } }) {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/cases/${params.id}/micro/suggest`, {
+      const result = await apiFetch<{
+        differential?: string[];
+        ihc?: string[];
+        error?: string;
+      }>(`/api/cases/${params.id}/micro/suggest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ findings: dictation }),
       });
-      const result = (await response.json()) as {
-        differential?: string[];
-        ihc?: string[];
-        error?: string;
-      };
-      if (!response.ok) throw new Error(result.error);
       setDifferential(result.differential || []);
       setIhc(result.ihc || []);
     } catch (cause) {
@@ -104,41 +124,49 @@ export default function MicroPage({ params }: { params: { id: string } }) {
       setBusy(false);
     }
   }
-  async function save(sendToConsultant = false) {
+  async function save(
+    sendToConsultant = false,
+    source: "tap" | "voice" = "tap",
+  ) {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/cases/${params.id}/micro`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dictation,
-          differential,
-          ihc,
-          provisionalDx,
-          notes,
-          confirmed: true,
-        }),
+      await runConfirmedAction("save_micro", {
+        caseId: Number(params.id),
+        dictation,
+        differential,
+        ihc,
+        provisionalDx,
+        notes,
+        sendToConsultant,
+        source,
       });
-      const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error);
-      if (sendToConsultant) {
-        const sendResponse = await fetch("/api/consultant/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            caseIds: [Number(params.id)],
-            confirmed: true,
-          }),
-        });
-        const sendResult = (await sendResponse.json()) as { error?: string };
-        if (!sendResponse.ok) throw new Error(sendResult.error);
-      }
       window.location.href = `/cases/${params.id}`;
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Could not save microscopy",
       );
+      setBusy(false);
+    }
+  }
+  async function submitBypass(source: "tap" | "voice" = "tap") {
+    if (!bypass || reason.trim().length < 3) {
+      setError("A reason is required.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await runConfirmedAction("bypass_step", {
+        caseId: Number(params.id),
+        step: "micro",
+        mode: bypass,
+        reason,
+        source,
+      });
+      window.location.href = `/cases/${params.id}`;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not continue");
       setBusy(false);
     }
   }
@@ -302,13 +330,39 @@ export default function MicroPage({ params }: { params: { id: string } }) {
             <button
               className="primary wide"
               disabled={dictation.trim().length < 3}
-              onClick={() => setReview(true)}
+              onClick={() => {
+                setReview(true);
+                window.speechSynthesis?.speak(
+                  new SpeechSynthesisUtterance(
+                    `Findings. ${dictation}. Provisional diagnosis. ${provisionalDx || "Not set"}`,
+                  ),
+                );
+              }}
             >
               Read back and save
             </button>
           </div>
         </>
       )}
+      <BypassStepModal
+        step="micro"
+        mode={bypass}
+        reason={reason}
+        busy={busy || recording}
+        onModeChange={setBypass}
+        onReasonChange={setReason}
+        onConfirm={() => void submitBypass("tap")}
+        voiceControl={
+          <button
+            className="voice-answer"
+            onClick={() =>
+              recording ? recorder.current?.stop() : void startVoice()
+            }
+          >
+            {recording ? "■ Stop" : "🎙 Say confirm or cancel"}
+          </button>
+        }
+      />
       {error && <div className="error">{error}</div>}
       {helpOpen && (
         <HelpPanel

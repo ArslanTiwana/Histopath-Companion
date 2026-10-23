@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { apiFetch } from "@/lib/api-fetch";
 
 export default function DictationButton({
   label,
@@ -34,14 +35,13 @@ export default function DictationButton({
           new Blob(chunks.current, { type: media.mimeType || "audio/webm" }),
         );
         try {
-          const response = await fetch("/api/voice/transcribe", {
+          const result = await apiFetch<{
+            transcript?: string;
+            error?: string;
+          }>("/api/voice/transcribe", {
             method: "POST",
             body: form,
           });
-          const result = (await response.json()) as {
-            transcript?: string;
-            error?: string;
-          };
           if (!result.transcript?.trim())
             throw new Error(result.error || "I didn't catch that");
           onTranscript(result.transcript.trim());

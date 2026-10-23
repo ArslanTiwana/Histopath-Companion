@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
+import { apiFetch } from "@/lib/api-fetch";
+import { runConfirmedAction } from "@/lib/client-actions";
 
 type Fields = {
   diagnosis: string;
@@ -63,18 +65,16 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    fetch(`/api/cases/${params.id}/consultant`)
-      .then((r) => r.json())
-      .then((data: Data) => {
-        setItem(data);
-        if (data.consultantEntry) {
-          setFields(data.consultantEntry.consultantDx);
-          setComparison(data.consultantEntry.comparison);
-          setLearnedNote(data.consultantEntry.learnedNote || "");
-          setSaved(true);
-          setReview(true);
-        }
-      });
+    apiFetch<Data>(`/api/cases/${params.id}/consultant`).then((data: Data) => {
+      setItem(data);
+      if (data.consultantEntry) {
+        setFields(data.consultantEntry.consultantDx);
+        setComparison(data.consultantEntry.comparison);
+        setLearnedNote(data.consultantEntry.learnedNote || "");
+        setSaved(true);
+        setReview(true);
+      }
+    });
   }, [params.id]);
   function applyDictation(text: string) {
     setFields((current) => ({
@@ -89,40 +89,43 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
         text.match(/\b\d+(?:\.\d+)?\s*(?:mm|cm)\b/i)?.[0] || current.tumourSize,
     }));
   }
-  async function save() {
+  async function save(source: "tap" | "voice" = "tap") {
     setBusy(true);
     setError("");
-    const response = await fetch(`/api/cases/${params.id}/consultant`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    try {
+      const response = await runConfirmedAction<{
+        comparison: Row[];
+      }>("save_consultant", {
+        caseId: Number(params.id),
         consultantDx: fields,
         learnedNote,
-        confirmed: true,
-      }),
-    });
-    const result = (await response.json()) as {
-      comparison?: Row[];
-      error?: string;
-    };
-    setBusy(false);
-    if (!response.ok)
-      return setError(result.error || "Could not save consultant review");
-    setComparison(result.comparison || []);
-    setSaved(true);
+        source,
+      });
+      setComparison(response.result.comparison || []);
+      setSaved(true);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not save consultant review",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
-  async function generate() {
+  async function generate(source: "tap" | "voice" = "tap") {
     setBusy(true);
     setError("");
-    const response = await fetch(`/api/cases/${params.id}/report`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "generate", confirmed: true }),
-    });
-    const result = (await response.json()) as { error?: string };
-    if (!response.ok) {
+    try {
+      await runConfirmedAction("generate_report", {
+        caseId: Number(params.id),
+        source,
+      });
+    } catch (cause) {
       setBusy(false);
-      return setError(result.error || "Could not generate report");
+      return setError(
+        cause instanceof Error ? cause.message : "Could not generate report",
+      );
     }
     window.location.href = `/cases/${params.id}/report`;
   }
@@ -188,7 +191,19 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
           <button
             className="primary wide"
             disabled={!fields.diagnosis.trim()}
-            onClick={() => setReview(true)}
+            onClick={() => {
+              setReview(true);
+              window.speechSynthesis?.speak(
+                new SpeechSynthesisUtterance(
+                  inputs
+                    .map(
+                      ([key, label]) =>
+                        `${label}. ${fields[key] || "Not recorded"}`,
+                    )
+                    .join(". "),
+                ),
+              );
+            }}
           >
             Read back and compare
           </button>
@@ -256,7 +271,7 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
                 label="Say generate report"
                 onTranscript={(text) =>
                   /generate report/i.test(text)
-                    ? void generate()
+                    ? void generate("voice")
                     : setError("Say generate report to continue.")
                 }
               />

@@ -1,5 +1,16 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated, isSetup, setPin, verifyPin } from "@/lib/auth";
+import { z } from "zod";
+import {
+  createSession,
+  isAuthenticated,
+  isSetup,
+  setPin,
+  verifyPin,
+} from "@/lib/auth";
+const input = z.object({
+  pin: z.string().regex(/^\d{4}$/, "PIN must be 4 digits"),
+  setup: z.boolean(),
+});
 export async function GET() {
   return NextResponse.json({
     setup: !(await isSetup()),
@@ -7,16 +18,26 @@ export async function GET() {
   });
 }
 export async function POST(req: Request) {
-  const body = (await req.json()) as { pin?: string; setup?: boolean };
-  if (!/^\d{4}$/.test(body.pin ?? ""))
+  const parsed = input.safeParse(await req.json().catch(() => null));
+  if (!parsed.success)
     return NextResponse.json(
-      { error: "PIN must be 4 digits" },
+      { error: parsed.error.issues[0]?.message || "Invalid PIN request" },
       { status: 400 },
     );
-  if (body.setup && !(await isSetup())) {
-    await setPin(body.pin!);
+  if (parsed.data.setup && !(await isSetup())) {
+    await setPin(parsed.data.pin);
+    await createSession();
     return NextResponse.json({ ok: true });
   }
-  const result = await verifyPin(body.pin!);
-  return NextResponse.json(result, { status: result.ok ? 200 : 401 });
+  const result = await verifyPin(parsed.data.pin);
+  if (result.ok) return NextResponse.json(result);
+  return NextResponse.json(
+    {
+      ...result,
+      error: result.lockedUntil
+        ? "Locked for 5 minutes"
+        : `Incorrect PIN. ${5 - (result.attempts || 0)} attempts left.`,
+    },
+    { status: 400 },
+  );
 }

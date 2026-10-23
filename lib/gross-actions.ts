@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "./db";
 import { GROSS_TEMPLATES } from "@/src/lib/gross/templates";
+import { transitionCase } from "./status";
 
 export const saveGrossSchema = z.object({
   action: z.literal("save"),
@@ -11,16 +12,6 @@ export const saveGrossSchema = z.object({
   notes: z.string().optional(),
   confirmed: z.literal(true),
 });
-export const bypassGrossSchema = z.object({
-  action: z.enum(["skip", "force"]),
-  reason: z.string().trim().min(3, "A reason is required"),
-  confirmed: z.literal(true),
-});
-export const grossActionSchema = z.discriminatedUnion("action", [
-  saveGrossSchema,
-  bypassGrossSchema,
-]);
-
 export async function completeGross(
   caseId: number,
   input: z.infer<typeof saveGrossSchema>,
@@ -67,86 +58,20 @@ export async function completeGross(
         notes: input.notes || null,
       },
     });
-    await tx.caseStep.update({
-      where: { caseId_step: { caseId, step: "gross" } },
-      data: { status: "done", completedAt: new Date() },
-    });
-    await tx.case.update({
-      where: { id: caseId },
-      data: { specimenType: input.specimenType, status: "micro_pending" },
-    });
-    await tx.event.createMany({
-      data: [
-        {
-          caseId,
+    await transitionCase(
+      {
+        caseId,
+        from: "gross_pending",
+        to: "micro_pending",
+        specimenType: input.specimenType,
+        steps: [{ step: "gross", status: "done" }],
+        event: {
           type: "gross_saved",
           payload: { specimenType: input.specimenType, confirmed: true },
         },
-        {
-          caseId,
-          type: "status_changed",
-          payload: { from: "gross_pending", to: "gross_done" },
-        },
-        {
-          caseId,
-          type: "status_changed",
-          payload: { from: "gross_done", to: "micro_pending" },
-        },
-      ],
-    });
-    return entry;
-  });
-}
-
-export async function bypassGross(
-  caseId: number,
-  input: z.infer<typeof bypassGrossSchema>,
-) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.case.findUnique({ where: { id: caseId } });
-    if (!current) throw new Error("Case not found");
-    if (current.status !== "gross_pending")
-      throw new Error("This case is not waiting for grossing");
-    const stepStatus = input.action === "skip" ? "skipped" : "forced";
-    await tx.caseStep.update({
-      where: { caseId_step: { caseId, step: "gross" } },
-      data: {
-        status: stepStatus,
-        reason: input.reason,
-        completedAt: new Date(),
       },
-    });
-    await tx.case.update({
-      where: { id: caseId },
-      data: { incomplete: true, status: "micro_pending" },
-    });
-    await tx.event.createMany({
-      data: [
-        {
-          caseId,
-          type: `gross_${stepStatus}`,
-          payload: { reason: input.reason, confirmed: true },
-        },
-        {
-          caseId,
-          type: "status_changed",
-          payload: {
-            from: "gross_pending",
-            to: "gross_done",
-            incomplete: true,
-          },
-        },
-        {
-          caseId,
-          type: "status_changed",
-          payload: {
-            from: "gross_done",
-            to: "micro_pending",
-            incomplete: true,
-          },
-        },
-      ],
-    });
-    return { status: "micro_pending", incomplete: true };
+      tx,
+    );
+    return entry;
   });
 }

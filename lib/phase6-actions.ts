@@ -51,16 +51,28 @@ export async function getBriefing(now = new Date()) {
   const overdueDays = settings?.overdueDays || 2;
   const reminders = await prisma.reminder.findMany({
     where: { done: false, dueAt: { lte: endOfToday(now) } },
-    include: { case: { select: { id: true, caseLabel: true, specimenType: true, status: true } } },
+    include: {
+      case: {
+        select: { id: true, caseLabel: true, specimenType: true, status: true },
+      },
+    },
     orderBy: { dueAt: "asc" },
   });
   const consultantCutoff = new Date(now.getTime() - overdueDays * 86_400_000);
   const waitingConsultant = await prisma.case.findMany({
     where: { status: "with_consultant", updatedAt: { lte: consultantCutoff } },
-    select: { id: true, caseLabel: true, specimenType: true, status: true, updatedAt: true },
+    select: {
+      id: true,
+      caseLabel: true,
+      specimenType: true,
+      status: true,
+      updatedAt: true,
+    },
     orderBy: { updatedAt: "asc" },
   });
-  const waitingIhc = reminders.filter((reminder) => /\bihc\b/i.test(reminder.text));
+  const waitingIhc = reminders.filter((reminder) =>
+    /\bihc\b/i.test(reminder.text),
+  );
   return {
     reminders,
     waitingConsultant,
@@ -79,9 +91,17 @@ export async function getEndOfDay(now = new Date()) {
       include: { case: { select: { id: true, caseLabel: true } } },
       orderBy: { dueAt: "asc" },
     }),
-    prisma.consultantEntry.count({ where: { createdAt: { gte: start, lte: end }, learnedNote: { not: null } } }),
+    prisma.consultantEntry.count({
+      where: {
+        createdAt: { gte: start, lte: end },
+        learnedNote: { not: null },
+      },
+    }),
     prisma.case.findMany({
-      where: { status: { not: "delivered" }, updatedAt: { gte: start, lte: end } },
+      where: {
+        status: { not: "delivered" },
+        updatedAt: { gte: start, lte: end },
+      },
       select: { id: true, caseLabel: true, status: true },
       orderBy: { updatedAt: "desc" },
       take: 20,
@@ -105,20 +125,42 @@ export async function closeDay(now = new Date()) {
     create: { day, counts, closedAt: now },
   });
   await prisma.event.create({
-    data: { type: "day_closed", payload: { day: day.toISOString().slice(0, 10), done: summary.done, revisit: summary.revisit, learned: summary.learned } },
+    data: {
+      type: "day_closed",
+      payload: {
+        day: day.toISOString().slice(0, 10),
+        done: summary.done,
+        revisit: summary.revisit,
+        learned: summary.learned,
+      },
+    },
   });
   return saved;
 }
 
 export async function searchCases(query: string) {
-  const numberWord = query.toLowerCase().match(/\blast\s+(\d+|one|two|three|four|five)\b/)?.[1];
-  const wordNumbers: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5 };
-  const limit = numberWord ? Number(numberWord) || wordNumbers[numberWord] || 10 : 20;
+  const numberWord = query
+    .toLowerCase()
+    .match(/\blast\s+(\d+|one|two|three|four|five)\b/)?.[1];
+  const wordNumbers: Record<string, number> = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+  };
+  const limit = numberWord
+    ? Number(numberWord) || wordNumbers[numberWord] || 10
+    : 20;
   const terms = query
     .toLowerCase()
     .replace(/\blast\s+(?:\d+|one|two|three|four|five)\b/g, "")
     .split(/\s+/)
-    .filter((term) => term.length > 1 && !["show", "find", "case", "cases", "with", "my", "the"].includes(term));
+    .filter(
+      (term) =>
+        term.length > 1 &&
+        !["show", "find", "case", "cases", "with", "my", "the"].includes(term),
+    );
   const cases = await prisma.case.findMany({
     include: { microEntry: true, consultantEntry: true },
     orderBy: { updatedAt: "desc" },
@@ -126,9 +168,25 @@ export async function searchCases(query: string) {
   });
   return cases
     .filter((item) => {
-      const haystack = [item.caseLabel, item.specimenType || "", item.status, item.microEntry?.provisionalDx || "", item.consultantEntry ? JSON.stringify(item.consultantEntry.consultantDx) : ""].join(" ").toLowerCase();
+      const haystack = [
+        item.caseLabel,
+        item.specimenType || "",
+        item.status,
+        item.microEntry?.provisionalDx || "",
+        item.consultantEntry
+          ? JSON.stringify(item.consultantEntry.consultantDx)
+          : "",
+      ]
+        .join(" ")
+        .toLowerCase();
       return terms.every((term) => haystack.includes(term));
     })
     .slice(0, Math.min(limit, 50))
-    .map((item) => ({ id: item.id, caseLabel: item.caseLabel, specimenType: item.specimenType, status: item.status, diagnosis: item.microEntry?.provisionalDx || null }));
+    .map((item) => ({
+      id: item.id,
+      caseLabel: item.caseLabel,
+      specimenType: item.specimenType,
+      status: item.status,
+      diagnosis: item.microEntry?.provisionalDx || null,
+    }));
 }

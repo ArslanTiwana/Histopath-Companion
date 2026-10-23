@@ -7,6 +7,8 @@ Read the spec before starting any task.
 ## Golden rules
 
 1. NEVER store or send patient details. Cases use only a case label (e.g. S-108).
+   Automated identifier screening is a heuristic safety net, not a guarantee;
+   keep the no-patient-details rule explicit in every workflow and review.
 2. A batch is only a label. Every case is independent. One code path for case logic.
 3. Read back and confirm before saving anything clinical or changing a stage.
 4. Every action works by voice AND by tap/typing.
@@ -26,7 +28,9 @@ AI is configured with `LLM_PROVIDER` (Groq by default), `GROQ_API_KEY`,
 
 ## Conventions
 
-- Code in src/, API routes in src/app/api, DB in prisma/schema.prisma
+- App code and API routes live in app/, shared server/client code lives in lib/,
+  AI and focused domain helpers may live in src/lib/, and the DB schema lives in
+  prisma/schema.prisma.
 - Validate all inputs with zod. No `any`.
 - Every status change writes an events row.
 - Small commits. Run lint + typecheck before finishing a task.
