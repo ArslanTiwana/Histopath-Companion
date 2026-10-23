@@ -29,6 +29,7 @@ export type ManagedReportTemplate = {
   id: number;
   schema: unknown;
   defaultText: string | null;
+  version?: number;
 };
 
 function interpolate(text: string, values: Record<string, string>) {

@@ -21,6 +21,7 @@ export async function GET(
       consultantEntry: true,
       report: true,
       typistChecks: { orderBy: { checkedAt: "desc" }, take: 1 },
+      reminders: { where: { done: false }, orderBy: { dueAt: "asc" } },
       events: { orderBy: { at: "desc" }, take: 30 },
     },
   });

@@ -60,6 +60,11 @@ export async function completeMicro(
         notes: input.notes || null,
       },
     });
+    if (input.ihc.length)
+      await tx.case.update({
+        where: { id: caseId },
+        data: { waitingIhc: true },
+      });
     await transitionCase(
       {
         caseId,

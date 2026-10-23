@@ -4,6 +4,7 @@ import Link from "@/app/components/ActionLink";
 import { useCallback, useEffect, useState } from "react";
 import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
+import { LoadingState } from "@/app/components/ScreenState";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
@@ -182,8 +183,14 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     editing,
     reportVersion: item?.report?.version,
     readBackVersion: item?.report?.readBackVersion,
+    dictationTarget: "report_field",
   }));
-  if (!item) return <main className="app-shell">Loading…</main>;
+  if (!item)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading report" />
+      </main>
+    );
   if (!item.report)
     return (
       <main className="app-shell">

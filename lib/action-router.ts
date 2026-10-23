@@ -1,7 +1,7 @@
 import type { RouterAction } from "@/src/lib/ai/types";
 
 export const ACTION_ROUTER_SYSTEM_PROMPT =
-  "Route commands to the supplied app actions. Return at most 3 function calls in order. Use only supplied actions and arguments. Never invent clinical values or patient details. Ask briefly if required data is missing.";
+  "Route commands to supplied actions. Return at most 3 calls in order. Replies must be 1 or 2 short spoken sentences with no markdown or lists. If no action matches and dictationTarget exists, use answer_current_question or append_dictation. If ambiguous, ask one short spoken question. Never invent clinical values or patient details.";
 
 export function buildActionRouterTools(actions: RouterAction[]) {
   const compactSchema = (

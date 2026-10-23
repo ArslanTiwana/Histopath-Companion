@@ -35,8 +35,22 @@ describe("voice fast path", () => {
       matchFastPath("create case S 141 appendix urgent")?.args,
     ).toMatchObject({
       label: "S-141",
-      specimen: "Appendix",
+      specimen: "appendix",
       priority: "urgent",
     });
+  });
+  it.each(["yes", "yeah", "save it"])(
+    "recognizes natural confirmation %s",
+    (text) => {
+      expect(matchFastPath(text)?.tool).toBe("confirm");
+    },
+  );
+  it("recognizes vocabulary additions", () => {
+    expect(matchRegistryFastPath("add word ileum to vocabulary")).toMatchObject(
+      {
+        tool: "add_vocabulary_word",
+        args: { word: "ileum" },
+      },
+    );
   });
 });

@@ -2,12 +2,7 @@ export const DEFAULT_VOICE_IDLE_TIMEOUT_MS = 120_000;
 export const DEFAULT_VOICE_SILENCE_MS = 1_000;
 export const DEFAULT_VOICE_MIN_SPEECH_MS = 400;
 
-const DEFAULT_HALLUCINATIONS = [
-  "thanks for watching",
-  "thank you for watching",
-  "please subscribe",
-  "subscribe to my channel",
-];
+import { VOICE_HALLUCINATION_PHRASES } from "@/lib/voice-config";
 
 const SHORT_COMMANDS = new Set([
   "stop",
@@ -34,7 +29,7 @@ export function isJunkTranscript(
     .replace(/[.!?]+$/g, "");
   if (!normalized) return true;
   const phrases = [
-    ...DEFAULT_HALLUCINATIONS,
+    ...VOICE_HALLUCINATION_PHRASES,
     ...configuredPhrases
       .split(",")
       .map((phrase) => phrase.trim().toLowerCase())

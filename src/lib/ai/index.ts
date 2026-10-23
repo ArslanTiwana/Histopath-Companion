@@ -40,6 +40,51 @@ export type CommandResult = z.infer<typeof commandResultSchema>;
 export type CommandContext = { screen: string; caseId?: number };
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
+export const consultantDictationSchema = z.object({
+  histology: z.string().default(""),
+  grade: z.string().default(""),
+  pT: z.string().default(""),
+  pN: z.string().default(""),
+  margins: z.string().default(""),
+  laterality: z.string().default(""),
+  tumourSize: z.string().default(""),
+  learnedNote: z.string().default(""),
+});
+
+export async function parseConsultantDictation(text: string) {
+  const raw = await chat({
+    system:
+      "Extract consultant histopathology fields as JSON only. Never put the whole sentence in histology. Use empty strings for absent fields. Keys: histology, grade, pT, pN, margins, laterality, tumourSize, learnedNote.",
+    messages: [{ role: "user", content: text }],
+    maxTokens: 220,
+  });
+  const object = JSON.parse(
+    raw.replace(/^```json\s*|```$/g, "").trim(),
+  ) as unknown;
+  return consultantDictationSchema.parse(object);
+}
+
+const typedReportFieldsSchema = z.object({
+  laterality: z.string().default(""),
+  diagnosis: z.string().default(""),
+  grade: z.string().default(""),
+  tumourSize: z.string().default(""),
+  stage: z.string().default(""),
+  margins: z.string().default(""),
+});
+
+export async function parseTypedReportFields(text: string) {
+  const raw = await chat({
+    system:
+      "Extract a typed histopathology report into JSON only with keys laterality, diagnosis, grade, tumourSize, stage, margins. Copy values exactly; use empty strings when absent.",
+    messages: [{ role: "user", content: text }],
+    maxTokens: 240,
+  });
+  return typedReportFieldsSchema.parse(
+    JSON.parse(raw.replace(/^```json\s*|```$/g, "").trim()) as unknown,
+  );
+}
+
 export type { RouterAction, RouterActionCall, RouterContext } from "./types";
 
 const ROUTER_SYSTEM_PROMPT =
@@ -140,11 +185,14 @@ const authorizationHeaders = () => ({
   "Content-Type": "application/json",
 });
 
-export async function transcribe(audio: Blob): Promise<string> {
+export async function transcribe(
+  audio: Blob,
+  vocabulary = HISTOPATHOLOGY_VOCABULARY,
+): Promise<{ text: string; confidence?: number }> {
   const body = new FormData();
   body.append("file", audio, "voice.webm");
   body.append("model", aiConfig.modelStt);
-  body.append("prompt", HISTOPATHOLOGY_VOCABULARY);
+  body.append("prompt", vocabulary);
   body.append("response_format", "json");
   return withRateLimitRetry(
     () =>
@@ -154,8 +202,11 @@ export async function transcribe(audio: Blob): Promise<string> {
         body,
       }),
     async (response) => {
-      const data = (await response.json()) as { text?: string };
-      return data.text?.trim() || "";
+      const data = (await response.json()) as {
+        text?: string;
+        confidence?: number;
+      };
+      return { text: data.text?.trim() || "", confidence: data.confidence };
     },
   );
 }
@@ -249,28 +300,33 @@ export async function runCommand(
   return CLARIFYING_RESPONSE;
 }
 
-export async function runActionRouter(
+async function runActionRouterWithModel(
   transcript: string,
   context: RouterContext,
+  model: string,
 ): Promise<{ calls: RouterActionCall[]; reply: string }> {
   const actions = context.actions.slice(0, 24);
   if (estimateRouterStaticTokens(actions) > 1_000)
     throw new Error("The current action registry exceeds the router budget.");
   const tools = buildActionRouterTools(actions);
   const compactState = JSON.stringify(context.screenState).slice(0, 1_200);
-  const compactTurns = context.lastTurns.slice(-3).join("\n").slice(0, 500);
+  const compactTurns = context.lastTurns
+    .slice(-4)
+    .map((turn) => JSON.stringify(turn))
+    .join("\n")
+    .slice(0, 900);
   const data = await withRateLimitRetry(
     () =>
       fetch(`${aiConfig.baseUrl}/chat/completions`, {
         method: "POST",
         headers: authorizationHeaders(),
         body: JSON.stringify({
-          model: aiConfig.modelCommands,
+          model,
           messages: [
             { role: "system", content: ACTION_ROUTER_SYSTEM_PROMPT },
             {
               role: "user",
-              content: `screen=${context.screenId}; state=${compactState}; recent=${compactTurns}`,
+              content: `screen=${context.screenId}; target=${context.dictationTarget || "none"}; state=${compactState}; recent=${compactTurns}`,
             },
             { role: "user", content: transcript },
           ],
@@ -314,6 +370,23 @@ export async function runActionRouter(
         ? `Running ${calls.map((call) => call.id.replaceAll("_", " ")).join(", ")}.`
         : "I need a little more detail."),
   };
+}
+
+export async function runActionRouter(
+  transcript: string,
+  context: RouterContext,
+): Promise<{ calls: RouterActionCall[]; reply: string }> {
+  const primary = await runActionRouterWithModel(
+    transcript,
+    context,
+    aiConfig.modelCommands,
+  );
+  if (primary.calls.length || !aiConfig.modelCommandsFallback) return primary;
+  return runActionRouterWithModel(
+    transcript,
+    context,
+    aiConfig.modelCommandsFallback,
+  );
 }
 
 export async function chat({

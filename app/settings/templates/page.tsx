@@ -15,11 +15,18 @@ type Template = {
   schema: unknown;
   defaultText: string | null;
 };
+type TemplateField = {
+  key: string;
+  label: string;
+  type: "text" | "number" | "choice";
+  unit: string;
+  defaultText: string;
+};
 const blank = {
   id: undefined as number | undefined,
   kind: "gross" as "gross" | "report",
   specimenType: "",
-  schemaText: "{}",
+  fields: [] as TemplateField[],
   defaultText: "",
 };
 
@@ -39,14 +46,34 @@ export default function TemplatesPage() {
       id: item.id,
       kind: item.kind,
       specimenType: item.specimenType,
-      schemaText: JSON.stringify(item.schema, null, 2),
+      fields: Array.isArray((item.schema as { fields?: unknown[] })?.fields)
+        ? (
+            item.schema as { fields: Array<string | Partial<TemplateField>> }
+          ).fields.map((field) =>
+            typeof field === "string"
+              ? {
+                  key: field,
+                  label: field,
+                  type: "text" as const,
+                  unit: "",
+                  defaultText: "",
+                }
+              : {
+                  key: field.key || "",
+                  label: field.label || field.key || "",
+                  type: field.type || "text",
+                  unit: field.unit || "",
+                  defaultText: field.defaultText || "",
+                },
+          )
+        : [],
       defaultText: item.defaultText || "",
     });
     setReview(false);
   }
   async function save() {
     try {
-      const schema = JSON.parse(form.schemaText) as unknown;
+      const schema = { fields: form.fields };
       await apiFetch<Template>("/api/templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -86,7 +113,7 @@ export default function TemplatesPage() {
       id: "set_template_field",
       description: "Set one template editor field.",
       args: z.object({
-        field: z.enum(["kind", "specimenType", "schemaText", "defaultText"]),
+        field: z.enum(["kind", "specimenType", "defaultText"]),
         value: z.string(),
       }),
       screens: ["templates"],
@@ -94,6 +121,54 @@ export default function TemplatesPage() {
       describe: ({ field }) => `Edit template ${field}`,
       run: ({ field, value }) =>
         setForm((current) => ({ ...current, [field]: value })),
+    }),
+    defineAction({
+      id: "add_template_field",
+      description: "Add a structured template field.",
+      args: z.object({}),
+      screens: ["templates"],
+      risk: "safe",
+      describe: () => "Add template field",
+      run: () =>
+        setForm((current) => ({
+          ...current,
+          fields: [
+            ...current.fields,
+            { key: "", label: "", type: "text", unit: "", defaultText: "" },
+          ],
+        })),
+    }),
+    defineAction({
+      id: "remove_template_field",
+      description: "Remove a structured template field.",
+      args: z.object({ index: z.number().int().nonnegative() }),
+      screens: ["templates"],
+      risk: "safe",
+      describe: () => "Remove template field",
+      run: ({ index }) =>
+        setForm((current) => ({
+          ...current,
+          fields: current.fields.filter((_, itemIndex) => itemIndex !== index),
+        })),
+    }),
+    defineAction({
+      id: "set_template_field_definition",
+      description: "Edit a structured template field.",
+      args: z.object({
+        index: z.number().int().nonnegative(),
+        field: z.enum(["key", "label", "type", "unit", "defaultText"]),
+        value: z.string(),
+      }),
+      screens: ["templates"],
+      risk: "safe",
+      describe: ({ field }) => `Edit template field ${field}`,
+      run: ({ index, field, value }) =>
+        setForm((current) => ({
+          ...current,
+          fields: current.fields.map((item, itemIndex) =>
+            itemIndex === index ? { ...item, [field]: value } : item,
+          ),
+        })),
     }),
     defineAction({
       id: "review_template",
@@ -178,19 +253,92 @@ export default function TemplatesPage() {
           }
           placeholder="Specimen type"
         />
-        <label className="field-label">
-          Schema JSON
-          <textarea
-            data-action="set_template_field"
-            value={form.schemaText}
-            onChange={(event) =>
-              void actions.run("set_template_field", {
-                field: "schemaText",
-                value: event.target.value,
-              })
-            }
-          />
-        </label>
+        <div className="form-stack">
+          <h3>Fields</h3>
+          {form.fields.map((field, index) => (
+            <div className="detail-card form-stack" key={index}>
+              <input
+                data-action="set_template_field_definition"
+                value={field.key}
+                placeholder="Key"
+                onChange={(event) =>
+                  void actions.run("set_template_field_definition", {
+                    index,
+                    field: "key",
+                    value: event.target.value,
+                  })
+                }
+              />
+              <input
+                data-action="set_template_field_definition"
+                value={field.label}
+                placeholder="Label"
+                onChange={(event) =>
+                  void actions.run("set_template_field_definition", {
+                    index,
+                    field: "label",
+                    value: event.target.value,
+                  })
+                }
+              />
+              <select
+                data-action="set_template_field_definition"
+                value={field.type}
+                onChange={(event) =>
+                  void actions.run("set_template_field_definition", {
+                    index,
+                    field: "type",
+                    value: event.target.value,
+                  })
+                }
+              >
+                <option value="text">Text</option>
+                <option value="number">Number</option>
+                <option value="choice">Choice</option>
+              </select>
+              <input
+                data-action="set_template_field_definition"
+                value={field.unit}
+                placeholder="Unit, optional"
+                onChange={(event) =>
+                  void actions.run("set_template_field_definition", {
+                    index,
+                    field: "unit",
+                    value: event.target.value,
+                  })
+                }
+              />
+              <input
+                data-action="set_template_field_definition"
+                value={field.defaultText}
+                placeholder="Default text"
+                onChange={(event) =>
+                  void actions.run("set_template_field_definition", {
+                    index,
+                    field: "defaultText",
+                    value: event.target.value,
+                  })
+                }
+              />
+              <button
+                className="secondary"
+                data-action="remove_template_field"
+                onClick={() =>
+                  void actions.run("remove_template_field", { index })
+                }
+              >
+                Remove field
+              </button>
+            </div>
+          ))}
+          <button
+            className="secondary"
+            data-action="add_template_field"
+            onClick={() => void actions.run("add_template_field")}
+          >
+            Add field
+          </button>
+        </div>
         <label className="field-label">
           Default text
           <textarea
@@ -204,6 +352,16 @@ export default function TemplatesPage() {
             }
           />
         </label>
+        <section className="readback">
+          <h3>Preview</h3>
+          {form.fields.map((field) => (
+            <p key={field.key || field.label}>
+              <b>{field.label || field.key || "Unnamed field"}</b>
+              {field.unit ? ` (${field.unit})` : ""}:{" "}
+              {field.defaultText || "Not recorded"}
+            </p>
+          ))}
+        </section>
         {review ? (
           <div className="readback">
             <p>

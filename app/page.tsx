@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "./components/ActionLink";
 import { z } from "zod";
-import VoiceBar from "./components/VoiceBar";
 import AppNav from "./components/AppNav";
 import { apiFetch } from "@/lib/api-fetch";
 import {
@@ -17,6 +16,7 @@ import { nextGrossCase, readyConsultantCaseIds } from "@/lib/worklist";
 import { useAuthState } from "./components/AuthState";
 import { useRegisterActions } from "./components/ActionProvider";
 import { defineAction, type AnyAction } from "@/lib/actions";
+import { specimenName } from "@/lib/specimens";
 type Case = {
   id: number;
   caseLabel: string;
@@ -24,6 +24,7 @@ type Case = {
   priority: "routine" | "urgent";
   status: string;
   incomplete: boolean;
+  attention: string[];
   batch?: { id: number; name: string } | null;
 };
 const labels: Record<string, string> = {
@@ -45,10 +46,16 @@ function PinGate({ onReady }: { onReady: () => void }) {
   useEffect(() => {
     apiFetch<{ setup: boolean; authenticated: boolean }>("/api/auth", {
       redirectOn401: false,
-    }).then((x) => {
-      setSetup(x.setup);
-      if (x.authenticated) onReady();
-    });
+    })
+      .then((x) => {
+        setSetup(x.setup);
+        if (x.authenticated) onReady();
+      })
+      .catch((cause) =>
+        setError(
+          cause instanceof Error ? cause.message : "Could not check the PIN",
+        ),
+      );
   }, [onReady]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -148,6 +155,7 @@ function Dashboard() {
     (c) =>
       filter === "all" ||
       (filter === "pending" && c.status !== "delivered") ||
+      (filter === "stuck" && c.attention.includes("overdue")) ||
       (filter === "incomplete" && c.incomplete) ||
       (filter === "batch" && c.batch?.id === activeBatch?.id) ||
       (filter === "single" && !c.batch),
@@ -353,7 +361,14 @@ function Dashboard() {
       id: "set_filter",
       description: "Filter the worklist.",
       args: z.object({
-        filter: z.enum(["all", "pending", "incomplete", "batch", "single"]),
+        filter: z.enum([
+          "all",
+          "pending",
+          "stuck",
+          "incomplete",
+          "batch",
+          "single",
+        ]),
       }),
       screens: ["worklist"],
       risk: "safe",
@@ -481,6 +496,7 @@ function Dashboard() {
             ["all", "All"],
             ["batch", "Batch"],
             ["single", "Single"],
+            ["stuck", "Stuck"],
             ["incomplete", "Incomplete"],
           ].map(([v, t]) => (
             <button
@@ -531,15 +547,10 @@ function Dashboard() {
       <section className="attention">
         <div className="section-title">
           <h2>Needs attention</h2>
-          <span>
-            {
-              cases.filter((c) => c.incomplete || c.priority === "urgent")
-                .length
-            }
-          </span>
+          <span>{cases.filter((c) => c.attention.length > 0).length}</span>
         </div>
         {cases
-          .filter((c) => c.incomplete || c.priority === "urgent")
+          .filter((c) => c.attention.length > 0)
           .slice(0, 3)
           .map((c) => (
             <CaseRow c={c} key={c.id} />
@@ -788,7 +799,6 @@ function Dashboard() {
           </div>
         </div>
       )}
-      <VoiceBar />
       <AppNav />
     </main>
   );
@@ -799,9 +809,9 @@ function CaseRow({ c }: { c: Case }) {
       <div>
         <strong>{c.caseLabel}</strong>
         <span>
-          {c.specimenType || "Specimen not set"} ·{" "}
-          {c.batch?.name || "Single case"}
+          {specimenName(c.specimenType)} · {c.batch?.name || "Single case"}
         </span>
+        {c.attention.length > 0 && <span>{c.attention.join(" · ")}</span>}
       </div>
       <div className="row-right">
         <span

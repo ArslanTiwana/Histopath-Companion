@@ -4,6 +4,7 @@ import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
+import { EmptyState, LoadingState } from "@/app/components/ScreenState";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
@@ -25,18 +26,21 @@ export default function TypistSendPage() {
   const [review, setReview] = useState(false);
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
-    apiFetch<Item[]>("/api/typist/send").then((data: Item[]) => {
-      setItems(data);
-      const requestedId = Number(
-        new URLSearchParams(window.location.search).get("caseId"),
-      );
-      setSelected(
-        requestedId && data.some((item) => item.id === requestedId)
-          ? [requestedId]
-          : data.map((item) => item.id),
-      );
-    });
+    apiFetch<Item[]>("/api/typist/send")
+      .then((data: Item[]) => {
+        setItems(data);
+        const requestedId = Number(
+          new URLSearchParams(window.location.search).get("caseId"),
+        );
+        setSelected(
+          requestedId && data.some((item) => item.id === requestedId)
+            ? [requestedId]
+            : data.map((item) => item.id),
+        );
+      })
+      .finally(() => setLoading(false));
   }, []);
   async function send(source: "tap" | "voice" = "tap") {
     try {
@@ -77,6 +81,22 @@ export default function TypistSendPage() {
     if (navigator.share && navigator.canShare?.({ files: [file] }))
       await navigator.share({ title: file.name, files: [file] });
     else download();
+  }
+  async function shareChannel(channel: "email" | "whatsapp") {
+    if (!bundle) return;
+    const text = encodeURIComponent(
+      `${bundle.filename} is ready in HistoPath Companion.`,
+    );
+    if (channel === "email")
+      window.location.href = `mailto:?subject=${encodeURIComponent(bundle.filename)}&body=${text}`;
+    else {
+      const popup = window.open(
+        `https://wa.me/?text=${text}`,
+        "_blank",
+        "noopener,noreferrer",
+      );
+      if (!popup) await share();
+    }
   }
   const screenActions: AnyAction[] = [
     defineAction({
@@ -143,6 +163,24 @@ export default function TypistSendPage() {
       run: share,
     }),
     defineAction({
+      id: "email_typist_file",
+      description: "Open an email for the prepared typist file.",
+      args: z.object({}),
+      screens: ["typist_bundle"],
+      risk: "safe",
+      describe: () => "Email typist file",
+      run: () => shareChannel("email"),
+    }),
+    defineAction({
+      id: "whatsapp_typist_file",
+      description: "Open WhatsApp for the prepared typist file.",
+      args: z.object({}),
+      screens: ["typist_bundle"],
+      risk: "safe",
+      describe: () => "Share typist file on WhatsApp",
+      run: () => shareChannel("whatsapp"),
+    }),
+    defineAction({
       id: "print_typist_file",
       description: "Print the prepared typist file.",
       args: z.object({}),
@@ -158,6 +196,12 @@ export default function TypistSendPage() {
     review,
     bundle: bundle?.filename || null,
   }));
+  if (loading)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading approved reports" />
+      </main>
+    );
   return (
     <main className="app-shell">
       <Link data-action="navigate" href="/" className="back">
@@ -200,6 +244,12 @@ export default function TypistSendPage() {
               </label>
             ))}
           </div>
+          {!items.length && (
+            <EmptyState
+              title="No approved reports"
+              detail="Reports appear here after approval."
+            />
+          )}
           <button
             className="primary wide"
             data-action="review_typist_send"
@@ -247,14 +297,14 @@ export default function TypistSendPage() {
               Download
             </button>
             <button
-              data-action="share_typist_file"
-              onClick={() => void actions.run("share_typist_file")}
+              data-action="email_typist_file"
+              onClick={() => void actions.run("email_typist_file")}
             >
               Email
             </button>
             <button
-              data-action="share_typist_file"
-              onClick={() => void actions.run("share_typist_file")}
+              data-action="whatsapp_typist_file"
+              onClick={() => void actions.run("whatsapp_typist_file")}
             >
               WhatsApp
             </button>

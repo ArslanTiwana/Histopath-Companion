@@ -1,13 +1,15 @@
 "use client";
 import { useState } from "react";
-import { useVoice } from "@/app/components/VoiceProvider";
 import { useActions } from "@/app/components/ActionProvider";
 import { useRegisterActions } from "@/app/components/ActionProvider";
 import { z } from "zod";
 import { defineAction, type AnyAction } from "@/lib/actions";
-export default function VoiceBar() {
+export default function VoiceBar({
+  submitTypedCommand,
+}: {
+  submitTypedCommand: (text: string) => Promise<void>;
+}) {
   const [typed, setTyped] = useState("");
-  const voice = useVoice();
   const actions = useActions();
   useRegisterActions(
     "global",
@@ -32,7 +34,7 @@ export default function VoiceBar() {
         run: ({ text }) => {
           const value = text || typed;
           if (value.trim()) {
-            void voice.submitTypedCommand(value.trim());
+            void submitTypedCommand(value.trim());
             setTyped("");
           }
         },
@@ -47,13 +49,7 @@ export default function VoiceBar() {
     }
   }
   return (
-    <div className="voice-bar">
-      <div className="voice-feedback">
-        {voice.lines.map((line, index) => (
-          <span key={`${index}-${line}`}>{line}</span>
-        ))}
-      </div>
-      <form onSubmit={submit} className="voice-input">
+      <form onSubmit={submit} className="voice-input floating-typed-command">
         <input
           data-action="set_voice_command"
           value={typed}
@@ -71,26 +67,5 @@ export default function VoiceBar() {
           Send
         </button>
       </form>
-      <button
-        className={`mic-button ${voice.state}`}
-        type="button"
-        data-action={voice.active ? "stop_listening" : "start_listening"}
-        onClick={() =>
-          voice.active
-            ? void actions.run("stop_listening")
-            : void actions.run("start_listening")
-        }
-        aria-label={
-          voice.active
-            ? "Stop hands-free listening"
-            : "Start hands-free listening"
-        }
-      >
-        {voice.active ? "■" : "🎙"}
-      </button>
-      <span className="voice-state" aria-live="polite">
-        {voice.state === "off" ? "Tap for hands-free" : voice.state}
-      </span>
-    </div>
   );
 }

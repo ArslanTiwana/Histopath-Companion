@@ -4,6 +4,7 @@ import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
+import { LoadingState } from "@/app/components/ScreenState";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
@@ -79,22 +80,25 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
       }
     });
   }, [params.id]);
-  function applyDictation(text: string) {
+  async function applyDictation(text: string) {
+    const parsed = await apiFetch<
+      Fields & { histology: string; learnedNote: string }
+    >("/api/voice/consultant-parse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
     setFields((current) => ({
       ...current,
-      diagnosis: text,
-      grade: text.match(/\bG(?:rade)?\s*[1-4]\b/i)?.[0] || current.grade,
-      pT: text.match(/\bpT\s*[0-4][a-d]?\b/i)?.[0] || current.pT,
-      pN: text.match(/\bpN\s*[0-3][a-c]?\b/i)?.[0] || current.pN,
-      margins:
-        text.match(
-          /\bmargins?\s*[:=-]?\s*(clear|negative|positive|involved)\b/i,
-        )?.[1] || current.margins,
-      laterality:
-        text.match(/\b(left|right|bilateral)\b/i)?.[0] || current.laterality,
-      tumourSize:
-        text.match(/\b\d+(?:\.\d+)?\s*(?:mm|cm)\b/i)?.[0] || current.tumourSize,
+      diagnosis: parsed.histology,
+      grade: parsed.grade,
+      pT: parsed.pT,
+      pN: parsed.pN,
+      margins: parsed.margins,
+      laterality: parsed.laterality,
+      tumourSize: parsed.tumourSize,
     }));
+    if (parsed.learnedNote) setLearnedNote(parsed.learnedNote);
   }
   async function save(source: "tap" | "voice" = "tap") {
     setBusy(true);
@@ -223,10 +227,16 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
     caseLabel: item?.caseLabel,
     fields,
     learnedNote,
+    dictationTarget: "consultant_dictation",
     mode: review ? "comparison" : "entry",
     saved,
   }));
-  if (!item) return <main className="app-shell">Loading…</main>;
+  if (!item)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading consultant comparison" />
+      </main>
+    );
   const rows: Row[] = comparison.length
     ? comparison
     : inputs.map(([field, label]) => ({

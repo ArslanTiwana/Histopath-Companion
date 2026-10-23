@@ -4,6 +4,7 @@ import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
+import { LoadingState } from "@/app/components/ScreenState";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
@@ -96,7 +97,12 @@ export default function DeliveredPage({ params }: { params: { id: string } }) {
     reason,
     modal: unlockOpen ? "unlock" : null,
   }));
-  if (!item) return <main className="app-shell">Loading…</main>;
+  if (!item)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading delivered case" />
+      </main>
+    );
   return (
     <main className="app-shell">
       <header>

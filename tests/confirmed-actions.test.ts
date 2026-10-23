@@ -26,6 +26,7 @@ vi.mock("@/lib/db", () => ({
     },
     undoAction: { create: db.undoCreate },
     case: { create: db.caseCreate },
+    template: { findUnique: vi.fn().mockResolvedValue(null) },
   },
 }));
 

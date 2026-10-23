@@ -59,7 +59,8 @@ export default function OfflineBanner() {
     <aside className="offline-banner">
       <b>Offline</b>
       <span>
-        Voice and AI are unavailable. Your scratch note stays on this device.
+        Recent cases you already opened remain read-only. Voice, AI, saving and
+        stage changes need a connection. Your scratch note stays on this device.
       </span>
       <textarea
         data-action="set_offline_note"

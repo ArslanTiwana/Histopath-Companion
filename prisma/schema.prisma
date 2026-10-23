@@ -46,10 +46,6 @@ model Setting {
   pinHash        String    @map("pin_hash")
   failedAttempts Int       @default(0) @map("failed_attempts")
   lockedUntil    DateTime? @map("locked_until")
-  aiProvider     String    @default("groq") @map("ai_provider")
-  aiBaseUrl      String?   @map("ai_base_url")
-  modelText      String?   @map("model_text")
-  modelStt       String?   @map("model_stt")
   overdueDays    Int       @default(2) @map("overdue_days")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
@@ -75,9 +71,11 @@ model Case {
   caseLabel       String           @unique @map("case_label")
   batchId         Int?             @map("batch_id")
   specimenType    String?          @map("specimen_type")
+  specimenTemplateId Int?          @map("specimen_template_id")
   priority        CasePriority     @default(routine)
   status          CaseStatus       @default(gross_pending)
   incomplete      Boolean          @default(false)
+  waitingIhc      Boolean          @default(false) @map("waiting_ihc")
   locked          Boolean          @default(false)
   deliveredAt     DateTime?        @map("delivered_at")
   createdAt       DateTime         @default(now()) @map("created_at")
@@ -92,6 +90,7 @@ model Case {
   typistChecks    TypistCheck[]
   helpSessions    HelpSession[]
   reminders       Reminder[]
+  specimenTemplate Template?       @relation("CaseSpecimenTemplate", fields: [specimenTemplateId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@map("cases")
@@ -139,6 +138,8 @@ model Report {
   id              Int       @id @default(autoincrement())
   caseId          Int       @unique @map("case_id")
   templateId      Int?      @map("template_id")
+  templateSnapshot Json?    @map("template_snapshot")
+  templateVersion Int?      @map("template_version")
   content         Json
   status          String    @default("draft")
   approvedAt      DateTime? @map("approved_at")
@@ -220,9 +221,11 @@ model Template {
   specimenType String   @map("specimen_type")
   schema       Json
   defaultText  String?  @map("default_text")
+  version      Int      @default(1)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
   reports      Report[]
+  cases        Case[]   @relation("CaseSpecimenTemplate")
 
   @@unique([kind, specimenType])
   @@map("templates")

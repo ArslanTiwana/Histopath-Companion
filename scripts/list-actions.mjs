@@ -72,7 +72,10 @@ const merged = new Map();
 for (const action of [...catalog, ...discovered])
   merged.set(`${action.screen}:${action.id}`, action);
 const grouped = new Map();
-for (const action of merged.values()) {
+const entries = Array.from(merged.values()).sort(
+  (a, b) => a.screen.localeCompare(b.screen) || a.id.localeCompare(b.id),
+);
+for (const action of entries) {
   const actions = grouped.get(action.screen) || [];
   actions.push(action);
   grouped.set(action.screen, actions);
@@ -97,4 +100,8 @@ for (const [screen, actions] of grouped) {
 await writeFile(
   new URL("../docs/voice-actions.md", import.meta.url),
   `${lines.join("\n")}\n`,
+);
+await writeFile(
+  new URL("../lib/generated-voice-actions.json", import.meta.url),
+  `${JSON.stringify(entries, null, 2)}\n`,
 );

@@ -4,6 +4,7 @@ import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
+import { LoadingState } from "@/app/components/ScreenState";
 import DictationButton from "@/app/components/DictationButton";
 import { useRegisterActions } from "@/app/components/ActionProvider";
 import { apiFetch } from "@/lib/api-fetch";
@@ -49,6 +50,19 @@ export default function BriefingPage() {
   }
   const screenActions: AnyAction[] = [
     defineAction({
+      id: "replay_briefing",
+      description: "Replay the morning briefing aloud.",
+      args: z.object({}),
+      screens: ["briefing"],
+      risk: "safe",
+      describe: () => "Replay briefing",
+      run: () =>
+        data?.summary &&
+        window.speechSynthesis?.speak(
+          new SpeechSynthesisUtterance(data.summary),
+        ),
+    }),
+    defineAction({
       id: "open_worklist",
       description: "Mark the briefing seen and open the worklist.",
       args: z.object({}),
@@ -64,7 +78,12 @@ export default function BriefingPage() {
     reminders: data?.reminders.map((item) => item.text) || [],
     modal: null,
   }));
-  if (!data) return <main className="app-shell">Loading briefing…</main>;
+  if (!data)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading briefing" />
+      </main>
+    );
   const rows = [
     ...data.reminders.map((reminder) => ({
       id: reminder.case?.id,
@@ -98,6 +117,13 @@ export default function BriefingPage() {
           <p>{data.summary}</p>
         </div>
       </section>
+      <button
+        data-action="replay_briefing"
+        className="secondary wide"
+        onClick={() => void actions.run("replay_briefing")}
+      >
+        Replay briefing
+      </button>
       <div className="briefing-list">
         {rows.map((row, index) =>
           row.id ? (

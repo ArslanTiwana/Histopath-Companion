@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+export { parseReminderCommand } from "./reminders";
 
 export function startOfToday(now = new Date()) {
   const value = new Date(now);
@@ -70,14 +71,21 @@ export async function getBriefing(now = new Date()) {
     },
     orderBy: { updatedAt: "asc" },
   });
-  const waitingIhc = reminders.filter((reminder) =>
-    /\bihc\b/i.test(reminder.text),
-  );
+  const waitingIhc = await prisma.case.count({
+    where: { waitingIhc: true, status: { not: "delivered" } },
+  });
+  const previousDay = new Date(startOfToday(now));
+  previousDay.setDate(previousDay.getDate() - 1);
+  const previousSummary = await prisma.daySummary.findFirst({
+    where: { day: { lte: previousDay } },
+    orderBy: { day: "desc" },
+  });
   return {
     reminders,
     waitingConsultant,
-    waitingIhc: waitingIhc.length,
-    summary: `${reminders.length} ${reminders.length === 1 ? "case" : "cases"} to revisit today. ${waitingIhc.length} waiting for IHC, ${waitingConsultant.length} waiting for consultant final.`,
+    waitingIhc,
+    previousSummary,
+    summary: `${reminders.length} ${reminders.length === 1 ? "case" : "cases"} to revisit today. ${waitingIhc} waiting for IHC, ${waitingConsultant.length} waiting for consultant final.${previousSummary ? ` Yesterday closed with ${JSON.stringify(previousSummary.counts)}.` : ""}`,
   };
 }
 
@@ -100,7 +108,6 @@ export async function getEndOfDay(now = new Date()) {
     prisma.case.findMany({
       where: {
         status: { not: "delivered" },
-        updatedAt: { gte: start, lte: end },
       },
       select: { id: true, caseLabel: true, status: true },
       orderBy: { updatedAt: "desc" },
@@ -118,6 +125,11 @@ export async function closeDay(now = new Date()) {
     revisit: summary.revisit,
     learned: summary.learned,
     carried: summary.carry.length,
+    carriedCases: summary.carry.map((item) => ({
+      id: item.id,
+      caseLabel: item.caseLabel,
+      status: item.status,
+    })),
   };
   const saved = await prisma.daySummary.upsert({
     where: { day },

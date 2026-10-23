@@ -37,13 +37,31 @@ const input = z.object({
         .max(30),
     }),
   ]),
-  lastTurns: z.array(z.string().max(500)).max(3).default([]),
+  lastTurns: z
+    .array(
+      z.object({
+        user: z.string().max(500).optional(),
+        assistant: z.string().max(500).optional(),
+        actions: z
+          .array(
+            z.object({
+              id: z.string().max(80),
+              args: z.record(z.string(), z.unknown()),
+            }),
+          )
+          .max(3)
+          .optional(),
+      }),
+    )
+    .max(4)
+    .default([]),
 });
 
 function registryFastPath(
   tool: string,
   args: Record<string, unknown>,
 ): { id: string; args: Record<string, unknown> } | null {
+  if (tool === "add_vocabulary_word") return { id: tool, args };
   if (tool === "open_worklist") return { id: "navigate", args: { to: "/" } };
   if (tool === "navigate") return { id: "navigate", args };
   if (tool === "open_case") return { id: "open_case", args };
@@ -314,6 +332,29 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  const change = parsed.data.transcript.match(/^change\s+.+?\s+to\s+(.+)$/i);
+  if (change && "screenId" in parsed.data.context) {
+    const target = parsed.data.context.screenState.dictationTarget;
+    if (target) {
+      const id =
+        target === "gross_question" || target === "provisional_diagnosis"
+          ? "answer_current_question"
+          : "append_dictation";
+      return NextResponse.json({
+        reply: "I will use the replacement value.",
+        calls: [
+          {
+            id,
+            args:
+              id === "answer_current_question"
+                ? { value: change[1] }
+                : { text: change[1] },
+          },
+        ],
+        needsConfirm: false,
+      });
+    }
+  }
   let command = matchRegistryFastPath(parsed.data.transcript);
   try {
     const dynamicContext =
@@ -332,6 +373,8 @@ export async function POST(request: Request) {
       const routed = await runActionRouter(parsed.data.transcript, {
         ...dynamicContext,
         lastTurns: parsed.data.lastTurns,
+        dictationTarget: dynamicContext.screenState.dictationTarget as
+          string | null | undefined,
       });
       const available = new Map(
         dynamicContext.actions.map((action) => [action.id, action]),
@@ -350,6 +393,27 @@ export async function POST(request: Request) {
           });
         }
         calls.push(call);
+      }
+      if (!calls.length && dynamicContext.screenState.dictationTarget) {
+        const target = String(dynamicContext.screenState.dictationTarget);
+        const id =
+          target === "gross_question" || target === "provisional_diagnosis"
+            ? "answer_current_question"
+            : "append_dictation";
+        return NextResponse.json({
+          reply: "I heard that as dictation.",
+          calls: [
+            {
+              id,
+              args:
+                id === "answer_current_question"
+                  ? { value: parsed.data.transcript }
+                  : { text: parsed.data.transcript },
+            },
+          ],
+          needsConfirm: false,
+          transcript: parsed.data.transcript,
+        });
       }
       return NextResponse.json({
         reply: routed.reply,

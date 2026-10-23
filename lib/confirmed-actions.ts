@@ -122,6 +122,10 @@ const actionSchemas = {
     id: z.number().int().positive(),
     source: sourceSchema,
   }),
+  delete_reminder: z.object({
+    id: z.number().int().positive(),
+    source: sourceSchema,
+  }),
   close_day: z.object({ source: sourceSchema }),
   save_help_session: z.object({
     caseId: z.number().int().positive(),
@@ -238,6 +242,7 @@ async function readBackFor(action: ConfirmedActionName, args: ActionArgs) {
   if (action === "create_reminder")
     return `Save reminder “${value.text}” for ${value.when}?`;
   if (action === "complete_reminder") return "Mark this reminder complete?";
+  if (action === "delete_reminder") return "Delete this reminder?";
   if (action === "close_day") return "Close today and save the summary?";
   return `Save this ${value.contextStep} help session${value.addedNote ? " and add the selected answer to notes" : ""}?`;
 }
@@ -252,7 +257,12 @@ export async function prepareConfirmedAction(
   checkFreeText(action, args);
   const readBackText = await readBackFor(action, args);
   const token = randomUUID();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const previous = await prisma.pendingAction.findFirst({
+    where: { sessionId },
+  });
+  if (previous)
+    await prisma.pendingAction.delete({ where: { token: previous.token } });
+  const expiresAt = new Date(Date.now() + 30 * 1000);
   await prisma.pendingAction.create({
     data: {
       token,
@@ -274,7 +284,12 @@ export async function prepareClientAction(
 ) {
   assertNoPatientIdentifiers(args);
   const token = randomUUID();
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const previous = await prisma.pendingAction.findFirst({
+    where: { sessionId },
+  });
+  if (previous)
+    await prisma.pendingAction.delete({ where: { token: previous.token } });
+  const expiresAt = new Date(Date.now() + 30 * 1000);
   await prisma.pendingAction.create({
     data: {
       token,
@@ -421,6 +436,19 @@ async function executeAction(
       data: {
         caseId: reminder.caseId,
         type: "reminder_completed",
+        payload: { reminderId: reminder.id },
+      },
+    });
+    return reminder;
+  }
+  if (action === "delete_reminder") {
+    const reminder = await prisma.reminder.delete({
+      where: { id: Number(value.id) },
+    });
+    await prisma.event.create({
+      data: {
+        caseId: reminder.caseId,
+        type: "reminder_deleted",
         payload: { reminderId: reminder.id },
       },
     });

@@ -13,20 +13,43 @@ export class ApiFetchError extends Error {
   }
 }
 
-type ApiFetchOptions = RequestInit & { redirectOn401?: boolean };
+type ApiFetchOptions = RequestInit & {
+  redirectOn401?: boolean;
+  timeoutMs?: number;
+};
+
+function reportRequestError(error: ApiFetchError) {
+  if (typeof window === "undefined" || error.kind === "unauthorized") return;
+  window.dispatchEvent(
+    new CustomEvent("app-request-error", {
+      detail: { message: error.message, status: error.status },
+    }),
+  );
+}
 
 export async function apiFetch<T>(
   input: string,
-  { redirectOn401 = true, ...init }: ApiFetchOptions = {},
+  { redirectOn401 = true, timeoutMs = 15000, ...init }: ApiFetchOptions = {},
 ): Promise<T> {
   let response: Response;
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromCaller = () => controller.abort();
+  init.signal?.addEventListener("abort", abortFromCaller, { once: true });
   try {
-    response = await fetch(input, init);
+    response = await fetch(input, { ...init, signal: controller.signal });
   } catch {
-    throw new ApiFetchError(
-      "Network error. Check your connection and try again.",
+    const error = new ApiFetchError(
+      controller.signal.aborted && !init.signal?.aborted
+        ? "This is taking too long. Check your connection and try again."
+        : "Network error. Check your connection and try again.",
       "network",
     );
+    reportRequestError(error);
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeout);
+    init.signal?.removeEventListener("abort", abortFromCaller);
   }
   let data: unknown = null;
   const contentType = response.headers.get("content-type") || "";
@@ -50,7 +73,9 @@ export async function apiFetch<T>(
       typeof data.error === "string"
         ? data.error
         : `Request failed (${response.status}).`;
-    throw new ApiFetchError(message, "http", response.status);
+    const error = new ApiFetchError(message, "http", response.status);
+    reportRequestError(error);
+    throw error;
   }
   return data as T;
 }

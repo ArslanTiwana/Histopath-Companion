@@ -16,6 +16,9 @@ import {
   containsPatientIdentifier,
   PATIENT_IDENTIFIER_MESSAGE,
 } from "@/src/lib/privacy";
+import type { ConversationTurn } from "@/src/lib/ai/types";
+import { readVoiceVocabulary } from "@/lib/voice-vocabulary";
+import { VOICE_MIN_CONFIDENCE } from "@/lib/voice-config";
 
 export type VoiceState =
   | "off"
@@ -45,6 +48,7 @@ type VoiceRouterContext = {
     risk: "safe" | "confirm";
     args: Record<string, unknown>;
   }>;
+  dictationTarget?: string | null;
 };
 
 type WakeLockLike = { release: () => Promise<void> };
@@ -57,6 +61,10 @@ const numberSetting = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+const localNumberSetting = (key: string, fallback: number) =>
+  typeof localStorage === "undefined"
+    ? fallback
+    : numberSetting(localStorage.getItem(key) || undefined, fallback);
 
 export function useVoiceInput(options?: {
   getRouterContext?: () => VoiceRouterContext;
@@ -70,6 +78,13 @@ export function useVoiceInput(options?: {
   const [notice, setNotice] = useState("");
   const [lastReply, setLastReply] = useState("");
   const [headsetMode, setHeadsetModeState] = useState(false);
+  const [latency, setLatency] = useState<{
+    transcribe: number;
+    route: number;
+    action: number;
+    total: number;
+  } | null>(null);
+  const turnsRef = useRef<ConversationTurn[]>([]);
 
   const activeRef = useRef(false);
   const headsetRef = useRef(false);
@@ -89,11 +104,17 @@ export function useVoiceInput(options?: {
   const speechPausedRef = useRef(false);
   const wakeLockRef = useRef<WakeLockLike | null>(null);
   const cooldownUntilRef = useRef(0);
+  const actionMsRef = useRef(0);
   const processRef = useRef<(blob: Blob) => Promise<void>>(
     async () => undefined,
   );
 
   const appendLine = useCallback((line: string) => {
+    if (
+      typeof localStorage !== "undefined" &&
+      localStorage.getItem("histopath_voice_transcript") === "off"
+    )
+      return;
     setLines((current) => [...current, line].slice(-3));
   }, []);
 
@@ -148,6 +169,17 @@ export function useVoiceInput(options?: {
         speechPausedRef.current = !headsetRef.current;
         setState("speaking");
         const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = Math.min(
+          2,
+          Math.max(0.5, localNumberSetting("histopath_voice_rate", 1)),
+        );
+        const voiceName = localStorage.getItem("histopath_voice_name");
+        const selectedVoice = voiceName
+          ? window.speechSynthesis
+              .getVoices()
+              .find((voice) => voice.name === voiceName)
+          : undefined;
+        if (selectedVoice) utterance.voice = selectedVoice;
         const finish = () => {
           speechPausedRef.current = false;
           if (activeRef.current) setState("listening");
@@ -166,6 +198,7 @@ export function useVoiceInput(options?: {
       if (containsPatientIdentifier(text))
         throw new Error(PATIENT_IDENTIFIER_MESSAGE);
       setState("thinking");
+      const turns = turnsRef.current.slice(-4);
       const data = await apiFetch<CommandResponse>("/api/voice/command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -176,10 +209,11 @@ export function useVoiceInput(options?: {
             screenState: { screenId: pathname },
             actions: [],
           },
-          lastTurns: lines.slice(-3),
+          lastTurns: turns,
         }),
       });
       let reply = data.reply || data.error || "I couldn't complete that.";
+      const actionStarted = performance.now();
       if (data.filter)
         window.dispatchEvent(
           new CustomEvent("voice-filter", { detail: data.filter }),
@@ -195,15 +229,32 @@ export function useVoiceInput(options?: {
         )
           reply = result.readBackText;
       }
+      const actionMs = performance.now() - actionStarted;
+      actionMsRef.current = actionMs;
       setLastReply(reply);
       appendLine(`Companion: ${reply}`);
+      turnsRef.current = [
+        ...turns,
+        {
+          user: text,
+          assistant: reply,
+          actions: (data.calls || []).map((call) => ({
+            id: call.id,
+            args: call.args,
+          })),
+        },
+      ].slice(-4);
+      localStorage.setItem(
+        "histopath_voice_turns",
+        JSON.stringify(turnsRef.current),
+      );
       if (data.goBack) router.back();
       else if (data.navigateTo && pathname !== data.navigateTo)
         router.push(data.navigateTo);
       await speak(reply);
       return data;
     },
-    [appendLine, lines, options, pathname, router, speak],
+    [appendLine, options, pathname, router, speak],
   );
 
   const friendlyError = useCallback((cause: unknown) => {
@@ -211,6 +262,12 @@ export function useVoiceInput(options?: {
     if (cause instanceof ApiFetchError && cause.status === 429) {
       message = "Voice is busy. Please wait a few seconds, then try again.";
       cooldownUntilRef.current = Date.now() + 5_000;
+      window.setTimeout(() => {
+        if (activeRef.current && Date.now() >= cooldownUntilRef.current) {
+          setNotice("");
+          setState("listening");
+        }
+      }, 5_100);
     } else if (cause instanceof Error && cause.message) message = cause.message;
     setNotice(message);
     setLastReply(message);
@@ -237,17 +294,28 @@ export function useVoiceInput(options?: {
       let failed = false;
       setNotice("");
       try {
+        const startedAt = performance.now();
         setState("transcribing");
         const form = new FormData();
         form.append("audio", blob, `speech.${extensionForMimeType(blob.type)}`);
-        const result = await apiFetch<{ transcript?: string }>(
-          "/api/voice/transcribe",
-          {
-            method: "POST",
-            body: form,
-          },
-        );
+        form.append("vocabulary", readVoiceVocabulary().join(", "));
+        const transcribeStarted = performance.now();
+        const result = await apiFetch<{
+          transcript?: string;
+          confidence?: number;
+        }>("/api/voice/transcribe", {
+          method: "POST",
+          body: form,
+        });
+        const transcribeMs = performance.now() - transcribeStarted;
         const transcript = result.transcript?.trim() || "";
+        if (
+          typeof result.confidence === "number" &&
+          result.confidence < VOICE_MIN_CONFIDENCE
+        ) {
+          setNotice("I could not hear that clearly. Please repeat.");
+          return;
+        }
         if (!transcript) {
           setNotice(
             "I didn't catch that. Keep speaking or use the typed command box.",
@@ -279,7 +347,22 @@ export function useVoiceInput(options?: {
           setNotice("Ignored a likely accidental or incomplete transcript.");
           return;
         }
+        const routeStarted = performance.now();
         await sendCommand(transcript);
+        const routeMs = performance.now() - routeStarted;
+        const value = {
+          transcribe: Math.round(transcribeMs),
+          route: Math.round(routeMs),
+          action: Math.round(actionMsRef.current),
+          total: Math.round(performance.now() - startedAt),
+        };
+        setLatency(value);
+        if (process.env.NODE_ENV === "development") {
+          console.info("[voice.latency]", value);
+          window.dispatchEvent(
+            new CustomEvent("voice-latency", { detail: value }),
+          );
+        }
       } catch (cause) {
         failed = true;
         friendlyError(cause);
@@ -325,9 +408,12 @@ export function useVoiceInput(options?: {
       chunksRef.current = [];
       if (
         speechMsRef.current <
-          numberSetting(
-            process.env.NEXT_PUBLIC_VOICE_MIN_SPEECH_MS,
-            DEFAULT_VOICE_MIN_SPEECH_MS,
+          localNumberSetting(
+            "histopath_voice_min_speech_ms",
+            numberSetting(
+              process.env.NEXT_PUBLIC_VOICE_MIN_SPEECH_MS,
+              DEFAULT_VOICE_MIN_SPEECH_MS,
+            ),
           ) ||
         !blob.size
       ) {
@@ -410,13 +496,19 @@ export function useVoiceInput(options?: {
         process.env.NEXT_PUBLIC_VOICE_VAD_THRESHOLD,
         0.025,
       );
-      const silenceMs = numberSetting(
-        process.env.NEXT_PUBLIC_VOICE_SILENCE_MS,
-        DEFAULT_VOICE_SILENCE_MS,
+      const silenceMs = localNumberSetting(
+        "histopath_voice_silence_ms",
+        numberSetting(
+          process.env.NEXT_PUBLIC_VOICE_SILENCE_MS,
+          DEFAULT_VOICE_SILENCE_MS,
+        ),
       );
-      const idleMs = numberSetting(
-        process.env.NEXT_PUBLIC_VOICE_IDLE_TIMEOUT_MS,
-        DEFAULT_VOICE_IDLE_TIMEOUT_MS,
+      const idleMs = localNumberSetting(
+        "histopath_voice_idle_ms",
+        numberSetting(
+          process.env.NEXT_PUBLIC_VOICE_IDLE_TIMEOUT_MS,
+          DEFAULT_VOICE_IDLE_TIMEOUT_MS,
+        ),
       );
       vadTimerRef.current = setInterval(() => {
         if (!activeRef.current) return;
@@ -509,6 +601,18 @@ export function useVoiceInput(options?: {
   }, []);
 
   useEffect(() => {
+    try {
+      const stored = JSON.parse(
+        localStorage.getItem("histopath_voice_turns") || "[]",
+      ) as unknown;
+      if (Array.isArray(stored))
+        turnsRef.current = stored.slice(-4) as ConversationTurn[];
+    } catch {
+      turnsRef.current = [];
+    }
+  }, []);
+
+  useEffect(() => {
     const hidden = () => {
       if (document.hidden && activeRef.current)
         stopSession("Voice stopped because the app moved to the background.");
@@ -525,6 +629,7 @@ export function useVoiceInput(options?: {
     lines,
     notice,
     lastReply,
+    latency,
     headsetMode,
     startSession,
     stopSession,

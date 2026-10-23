@@ -56,6 +56,14 @@ function labelIn(text: string): string | null {
 
 export function matchFastPath(transcript: string): FastPath {
   const text = transcript.toLowerCase().trim();
+  const vocabulary = transcript.match(/^add word (.+) to vocabulary$/i);
+  if (vocabulary)
+    return {
+      tool: "add_vocabulary_word",
+      args: { word: vocabulary[1].trim() },
+      reply: `Adding ${vocabulary[1].trim()} to the vocabulary.`,
+      needsConfirm: false,
+    };
   const range = parseRange(transcript);
   if (/\bsend\b.+\bto consultant\b/.test(text))
     return {
@@ -66,15 +74,23 @@ export function matchFastPath(transcript: string): FastPath {
         : "Which case range should I send to the consultant?",
       needsConfirm: false,
     };
-  if (/\b(?:new|create|add)\s+(?:a\s+)?batch\b/.test(text))
-    return {
-      tool: "create_batch",
-      args: range ? { start: range.start, end: range.end } : {},
+  if (/\b(?:new|create|add)\s+(?:a\s+)?batch\b/.test(text)) {
+    const named = transcript.match(
+      /\bbatch\s+(.+?)(?:,|\s+cases?\s+|\s+from\s+)/i,
+    );
+    const result = {
+      tool: "create_batch" as const,
+      args: {
+        ...(named?.[1] ? { name: named[1].trim() } : {}),
+        ...(range ? { start: range.start, end: range.end } : {}),
+      },
       reply: range
         ? `Preparing ${range.start} to ${range.end}.`
         : "What case range should I create, for example S-101 to S-140?",
       needsConfirm: false,
     };
+    return result;
+  }
   if (/\b(?:new|create|add)\s+(?:a\s+)?(?:new\s+)?case\b/.test(text)) {
     const label = labelIn(transcript);
     const specimen = [
@@ -89,13 +105,7 @@ export function matchFastPath(transcript: string): FastPath {
       tool: "create_case",
       args: {
         ...(label ? { label } : {}),
-        ...(specimen
-          ? {
-              specimen: specimen.replace(/\b\w/g, (letter) =>
-                letter.toUpperCase(),
-              ),
-            }
-          : {}),
+        ...(specimen ? { specimen: specimen.replaceAll(" ", "_") } : {}),
         priority: text.includes("urgent") ? "urgent" : "routine",
       },
       reply: label
@@ -125,6 +135,13 @@ export function matchFastPath(transcript: string): FastPath {
       reply: "Showing incomplete cases.",
       needsConfirm: false,
     };
+  if (/^(show stuck|stuck cases|show overdue|overdue cases)$/.test(text))
+    return {
+      tool: "set_filter",
+      args: { filter: "stuck" },
+      reply: "Showing overdue cases.",
+      needsConfirm: false,
+    };
   const open = text.match(/^open case\s+(.+)$/);
   if (open)
     return {
@@ -147,14 +164,14 @@ export function matchFastPath(transcript: string): FastPath {
       reply: "Opening the worklist.",
       needsConfirm: false,
     };
-  if (/^(confirm|yes|save)$/.test(text))
+  if (/^(confirm|yes|yeah|yep|save|save it|okay|ok)$/.test(text))
     return {
       tool: "confirm",
       args: {},
       reply: "Confirming the pending action.",
       needsConfirm: false,
     };
-  if (/^(cancel|no|stop)$/.test(text))
+  if (/^(cancel|no|nope|don't|do not|change it)$/.test(text))
     return {
       tool: "cancel",
       args: {},

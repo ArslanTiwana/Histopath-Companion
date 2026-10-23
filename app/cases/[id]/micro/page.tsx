@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { z } from "zod";
 import HelpPanel from "@/app/components/HelpPanel";
 import AppNav from "@/app/components/AppNav";
+import { LoadingState } from "@/app/components/ScreenState";
 import BypassStepModal from "@/app/components/BypassStepModal";
 import DictationButton from "@/app/components/DictationButton";
 import { useRegisterActions } from "@/app/components/ActionProvider";
@@ -266,11 +267,17 @@ export default function MicroPage({ params }: { params: { id: string } }) {
     caseLabel: item?.caseLabel,
     findings: dictation,
     provisionalDx,
+    dictationTarget: bypass ? "bypass_reason" : "micro_findings",
     suggestions: { differential, ihc },
     mode: review ? "review" : "entry",
     modal: helpOpen ? "help" : bypass ? `bypass_${bypass}` : null,
   }));
-  if (!item) return <main className="app-shell">Loading…</main>;
+  if (!item)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading microscopy" />
+      </main>
+    );
   if (item.status !== "micro_pending")
     return (
       <main className="app-shell">

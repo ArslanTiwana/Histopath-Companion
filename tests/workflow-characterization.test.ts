@@ -45,7 +45,7 @@ describe("case intake characterization", () => {
     expect(prisma.case.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         caseLabel: "S-141",
-        specimenType: "Appendix",
+        specimenType: "appendix",
         priority: "urgent",
         steps: {
           create: [

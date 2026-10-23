@@ -388,5 +388,17 @@
     "id": "save_template",
     "risk": "confirm",
     "description": "Save a template"
+  },
+  {
+    "screen": "global",
+    "id": "dictate",
+    "risk": "safe",
+    "description": "Dictate into the active field"
+  },
+  {
+    "screen": "case_detail",
+    "id": "move_to_next_step",
+    "risk": "safe",
+    "description": "Move the case to its next step"
   }
 ]

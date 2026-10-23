@@ -1,0 +1,842 @@
+[
+  {
+    "screen": "briefing",
+    "id": "open_worklist",
+    "risk": "safe",
+    "description": "Mark the briefing seen and open the worklist."
+  },
+  {
+    "screen": "briefing",
+    "id": "replay_briefing",
+    "risk": "safe",
+    "description": "Replay the morning briefing aloud."
+  },
+  {
+    "screen": "case_detail",
+    "id": "bypass_pending_step",
+    "risk": "confirm",
+    "description": "Skip or force the pending case step."
+  },
+  {
+    "screen": "case_detail",
+    "id": "complete_case_reminder",
+    "risk": "confirm",
+    "description": "Complete this case reminder."
+  },
+  {
+    "screen": "case_detail",
+    "id": "create_case_reminder",
+    "risk": "confirm",
+    "description": "Create a reminder for this case."
+  },
+  {
+    "screen": "case_detail",
+    "id": "move_to_next_step",
+    "risk": "safe",
+    "description": "Move the case to its next step"
+  },
+  {
+    "screen": "case_detail",
+    "id": "set_case_bypass",
+    "risk": "safe",
+    "description": "Set skip or force mode and reason."
+  },
+  {
+    "screen": "case_detail",
+    "id": "set_case_reminder",
+    "risk": "safe",
+    "description": "Set this case reminder text and date."
+  },
+  {
+    "screen": "cases",
+    "id": "search_cases_list",
+    "risk": "safe",
+    "description": "Search the all-cases list."
+  },
+  {
+    "screen": "cases",
+    "id": "set_cases_batch_filter",
+    "risk": "safe",
+    "description": "Filter all cases by batch."
+  },
+  {
+    "screen": "cases",
+    "id": "set_cases_filter",
+    "risk": "safe",
+    "description": "Show started, not started, or completed cases."
+  },
+  {
+    "screen": "consultant",
+    "id": "dictate_consultant",
+    "risk": "safe",
+    "description": "Parse consultant fields from dictation."
+  },
+  {
+    "screen": "consultant",
+    "id": "edit_consultant",
+    "risk": "safe",
+    "description": "Return to consultant editing."
+  },
+  {
+    "screen": "consultant",
+    "id": "enter_consultant_review",
+    "risk": "safe",
+    "description": "Open and speak the consultant comparison."
+  },
+  {
+    "screen": "consultant",
+    "id": "generate_report",
+    "risk": "confirm",
+    "description": "Generate the report from saved consultant findings."
+  },
+  {
+    "screen": "consultant",
+    "id": "save_consultant",
+    "risk": "confirm",
+    "description": "Save consultant diagnosis and comparison."
+  },
+  {
+    "screen": "consultant",
+    "id": "set_consultant_field",
+    "risk": "safe",
+    "description": "Set a consultant diagnosis field or learned note."
+  },
+  {
+    "screen": "delivered",
+    "id": "open_unlock",
+    "risk": "safe",
+    "description": "Open or close the unlock controls."
+  },
+  {
+    "screen": "delivered",
+    "id": "set_unlock_reason",
+    "risk": "safe",
+    "description": "Set the logged unlock reason."
+  },
+  {
+    "screen": "delivered",
+    "id": "unlock_case",
+    "risk": "confirm",
+    "description": "Unlock this delivered case with a reason."
+  },
+  {
+    "screen": "end_day",
+    "id": "cancel_close_day",
+    "risk": "safe",
+    "description": "Cancel close-day review."
+  },
+  {
+    "screen": "end_day",
+    "id": "cancel_reminder_review",
+    "risk": "safe",
+    "description": "Cancel the reminder read-back and edit it."
+  },
+  {
+    "screen": "end_day",
+    "id": "close_day",
+    "risk": "confirm",
+    "description": "Close today and save its summary."
+  },
+  {
+    "screen": "end_day",
+    "id": "complete_reminder",
+    "risk": "confirm",
+    "description": "Mark a reminder complete."
+  },
+  {
+    "screen": "end_day",
+    "id": "create_reminder",
+    "risk": "confirm",
+    "description": "Confirm and save the pending reminder."
+  },
+  {
+    "screen": "end_day",
+    "id": "delete_reminder",
+    "risk": "confirm",
+    "description": "Delete a reminder."
+  },
+  {
+    "screen": "end_day",
+    "id": "review_close_day",
+    "risk": "safe",
+    "description": "Open the close-day read-back."
+  },
+  {
+    "screen": "end_day",
+    "id": "review_reminder",
+    "risk": "safe",
+    "description": "Read back a reminder before saving."
+  },
+  {
+    "screen": "end_day",
+    "id": "set_reminder_fields",
+    "risk": "safe",
+    "description": "Set reminder text or date."
+  },
+  {
+    "screen": "global",
+    "id": "add_vocabulary_word",
+    "risk": "safe",
+    "description": "Add a word to the speech vocabulary."
+  },
+  {
+    "screen": "global",
+    "id": "answer_current_question",
+    "risk": "safe",
+    "description": "Answer the current screen question or dictation target."
+  },
+  {
+    "screen": "global",
+    "id": "append_dictation",
+    "risk": "safe",
+    "description": "Append speech to the current dictation target."
+  },
+  {
+    "screen": "global",
+    "id": "cancel",
+    "risk": "safe",
+    "description": "Cancel the pending action"
+  },
+  {
+    "screen": "global",
+    "id": "confirm",
+    "risk": "safe",
+    "description": "Confirm the pending action"
+  },
+  {
+    "screen": "global",
+    "id": "dictate",
+    "risk": "safe",
+    "description": "Dictate into the active field"
+  },
+  {
+    "screen": "global",
+    "id": "go_back",
+    "risk": "safe",
+    "description": "Return to the previous screen."
+  },
+  {
+    "screen": "global",
+    "id": "navigate",
+    "risk": "safe",
+    "description": "Open a named app route."
+  },
+  {
+    "screen": "global",
+    "id": "next_case",
+    "risk": "safe",
+    "description": "Open the next case waiting for grossing."
+  },
+  {
+    "screen": "global",
+    "id": "open_case",
+    "risk": "safe",
+    "description": "Open a case by case label."
+  },
+  {
+    "screen": "global",
+    "id": "read_screen",
+    "risk": "safe",
+    "description": "Read a short summary of the current screen."
+  },
+  {
+    "screen": "global",
+    "id": "retry_screen",
+    "risk": "safe",
+    "description": "Reload the current screen after an error."
+  },
+  {
+    "screen": "global",
+    "id": "set_filter",
+    "risk": "safe",
+    "description": "Change the visible case filter."
+  },
+  {
+    "screen": "global",
+    "id": "set_offline_note",
+    "risk": "safe",
+    "description": "Set the temporary device-only offline note."
+  },
+  {
+    "screen": "global",
+    "id": "set_voice_command",
+    "risk": "safe",
+    "description": "Set the typed voice command fallback."
+  },
+  {
+    "screen": "global",
+    "id": "start_listening",
+    "risk": "safe",
+    "description": "Start the hands-free voice session."
+  },
+  {
+    "screen": "global",
+    "id": "stop_listening",
+    "risk": "safe",
+    "description": "Stop the hands-free voice session."
+  },
+  {
+    "screen": "global",
+    "id": "submit_voice_command",
+    "risk": "safe",
+    "description": "Submit the typed command through the voice action router."
+  },
+  {
+    "screen": "global",
+    "id": "toggle_voice_details",
+    "risk": "safe",
+    "description": "Show or hide recent voice details."
+  },
+  {
+    "screen": "global",
+    "id": "undo_last",
+    "risk": "safe",
+    "description": "Undo the last safe action"
+  },
+  {
+    "screen": "gross",
+    "id": "answer_gross_question",
+    "risk": "safe",
+    "description": "Answer the current gross checklist question."
+  },
+  {
+    "screen": "gross",
+    "id": "bypass_step",
+    "risk": "confirm",
+    "description": "Skip or force gross with a logged reason."
+  },
+  {
+    "screen": "gross",
+    "id": "edit_gross_answers",
+    "risk": "safe",
+    "description": "Return to gross answers."
+  },
+  {
+    "screen": "gross",
+    "id": "enter_gross_review",
+    "risk": "safe",
+    "description": "Open and speak the gross read-back."
+  },
+  {
+    "screen": "gross",
+    "id": "next_gross_field",
+    "risk": "safe",
+    "description": "Move to the next gross field or review."
+  },
+  {
+    "screen": "gross",
+    "id": "open_help",
+    "risk": "safe",
+    "description": "Open gross study help."
+  },
+  {
+    "screen": "gross",
+    "id": "previous_gross_field",
+    "risk": "safe",
+    "description": "Move to the previous gross field."
+  },
+  {
+    "screen": "gross",
+    "id": "read_aloud",
+    "risk": "safe",
+    "description": "Read the gross description aloud."
+  },
+  {
+    "screen": "gross",
+    "id": "same_as_previous",
+    "risk": "safe",
+    "description": "Copy the latest gross from the same specimen type."
+  },
+  {
+    "screen": "gross",
+    "id": "save_gross",
+    "risk": "confirm",
+    "description": "Save gross and advance to microscopy."
+  },
+  {
+    "screen": "gross",
+    "id": "select_gross_field",
+    "risk": "safe",
+    "description": "Select a gross checklist field by position."
+  },
+  {
+    "screen": "gross",
+    "id": "set_bypass_mode",
+    "risk": "safe",
+    "description": "Open or close gross bypass."
+  },
+  {
+    "screen": "gross",
+    "id": "set_bypass_reason",
+    "risk": "safe",
+    "description": "Set the gross bypass reason."
+  },
+  {
+    "screen": "gross",
+    "id": "set_specimen",
+    "risk": "safe",
+    "description": "Select a specimen template by slug or name."
+  },
+  {
+    "screen": "help",
+    "id": "add_help_answer",
+    "risk": "confirm",
+    "description": "Add the latest help answer to notes and close."
+  },
+  {
+    "screen": "help",
+    "id": "ask_help",
+    "risk": "safe",
+    "description": "Ask the contextual study-aid assistant."
+  },
+  {
+    "screen": "help",
+    "id": "close_help",
+    "risk": "confirm",
+    "description": "Close help without adding its answer to notes."
+  },
+  {
+    "screen": "help",
+    "id": "set_help_question",
+    "risk": "safe",
+    "description": "Set the contextual help question."
+  },
+  {
+    "screen": "learned",
+    "id": "save_learned_note",
+    "risk": "confirm",
+    "description": "Save a learned note."
+  },
+  {
+    "screen": "learned",
+    "id": "search_learned",
+    "risk": "safe",
+    "description": "Search learned differences by diagnosis or field."
+  },
+  {
+    "screen": "learned",
+    "id": "set_learned_note",
+    "risk": "safe",
+    "description": "Edit a learned note."
+  },
+  {
+    "screen": "micro",
+    "id": "bypass_step",
+    "risk": "confirm",
+    "description": "Skip or force microscopy with a logged reason."
+  },
+  {
+    "screen": "micro",
+    "id": "edit_micro",
+    "risk": "safe",
+    "description": "Return to microscopy editing."
+  },
+  {
+    "screen": "micro",
+    "id": "enter_micro_review",
+    "risk": "safe",
+    "description": "Open and speak the microscopy read-back."
+  },
+  {
+    "screen": "micro",
+    "id": "generate_suggestions",
+    "risk": "safe",
+    "description": "Generate study suggestions from current findings."
+  },
+  {
+    "screen": "micro",
+    "id": "ignore_suggestions",
+    "risk": "safe",
+    "description": "Clear the generated suggestions."
+  },
+  {
+    "screen": "micro",
+    "id": "open_help",
+    "risk": "safe",
+    "description": "Open microscopy study help."
+  },
+  {
+    "screen": "micro",
+    "id": "read_aloud",
+    "risk": "safe",
+    "description": "Read current microscopy content aloud."
+  },
+  {
+    "screen": "micro",
+    "id": "save_micro",
+    "risk": "confirm",
+    "description": "Save microscopy, optionally sending to consultant."
+  },
+  {
+    "screen": "micro",
+    "id": "set_bypass_mode",
+    "risk": "safe",
+    "description": "Open or close microscopy bypass."
+  },
+  {
+    "screen": "micro",
+    "id": "set_bypass_reason",
+    "risk": "safe",
+    "description": "Set the microscopy bypass reason."
+  },
+  {
+    "screen": "micro",
+    "id": "set_micro_findings",
+    "risk": "safe",
+    "description": "Set or append microscopy findings."
+  },
+  {
+    "screen": "micro",
+    "id": "set_provisional_diagnosis",
+    "risk": "safe",
+    "description": "Set the provisional diagnosis."
+  },
+  {
+    "screen": "report",
+    "id": "approve_report",
+    "risk": "confirm",
+    "description": "Approve the current report version."
+  },
+  {
+    "screen": "report",
+    "id": "generate_report",
+    "risk": "confirm",
+    "description": "Generate the report."
+  },
+  {
+    "screen": "report",
+    "id": "read_report",
+    "risk": "confirm",
+    "description": "Speak and record read-back for this report version."
+  },
+  {
+    "screen": "report",
+    "id": "set_report_field",
+    "risk": "safe",
+    "description": "Edit one report field."
+  },
+  {
+    "screen": "report",
+    "id": "toggle_report_edit",
+    "risk": "safe",
+    "description": "Switch between report edit and preview."
+  },
+  {
+    "screen": "search",
+    "id": "open_search_result",
+    "risk": "safe",
+    "description": "Open a visible search result by one-based position."
+  },
+  {
+    "screen": "search",
+    "id": "search",
+    "risk": "safe",
+    "description": "Search cases without putting search text in the URL."
+  },
+  {
+    "screen": "search",
+    "id": "set_search_query",
+    "risk": "safe",
+    "description": "Set the private case search text."
+  },
+  {
+    "screen": "settings",
+    "id": "export",
+    "risk": "safe",
+    "description": "Download the local-date case export."
+  },
+  {
+    "screen": "settings",
+    "id": "save_settings",
+    "risk": "confirm",
+    "description": "Save worklist preferences."
+  },
+  {
+    "screen": "settings",
+    "id": "set_headset_mode",
+    "risk": "safe",
+    "description": "Turn headset barge-in mode on or off."
+  },
+  {
+    "screen": "settings",
+    "id": "set_overdue_days",
+    "risk": "safe",
+    "description": "Set the overdue threshold."
+  },
+  {
+    "screen": "settings",
+    "id": "set_speech_rate",
+    "risk": "safe",
+    "description": "Set speech rate."
+  },
+  {
+    "screen": "settings",
+    "id": "set_speech_voice",
+    "risk": "safe",
+    "description": "Select the speech voice."
+  },
+  {
+    "screen": "settings",
+    "id": "set_transcript_visibility",
+    "risk": "safe",
+    "description": "Turn transcript display on or off."
+  },
+  {
+    "screen": "settings",
+    "id": "set_voice_auto_stop",
+    "risk": "safe",
+    "description": "Set voice auto-stop minutes."
+  },
+  {
+    "screen": "settings",
+    "id": "set_voice_silence",
+    "risk": "safe",
+    "description": "Set voice silence length in milliseconds."
+  },
+  {
+    "screen": "templates",
+    "id": "add_template_field",
+    "risk": "safe",
+    "description": "Add a structured template field."
+  },
+  {
+    "screen": "templates",
+    "id": "edit_template",
+    "risk": "safe",
+    "description": "Load a template into the editor."
+  },
+  {
+    "screen": "templates",
+    "id": "edit_template_form",
+    "risk": "safe",
+    "description": "Return to template editing."
+  },
+  {
+    "screen": "templates",
+    "id": "remove_template_field",
+    "risk": "safe",
+    "description": "Remove a structured template field."
+  },
+  {
+    "screen": "templates",
+    "id": "review_template",
+    "risk": "safe",
+    "description": "Review the template before saving."
+  },
+  {
+    "screen": "templates",
+    "id": "save_template",
+    "risk": "confirm",
+    "description": "Save this template."
+  },
+  {
+    "screen": "templates",
+    "id": "set_template_field",
+    "risk": "safe",
+    "description": "Set one template editor field."
+  },
+  {
+    "screen": "templates",
+    "id": "set_template_field_definition",
+    "risk": "safe",
+    "description": "Edit a structured template field."
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "cancel_typist_send",
+    "risk": "safe",
+    "description": "Return to typist selection."
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "download_typist_file",
+    "risk": "safe",
+    "description": "Download the prepared typist file."
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "email_typist_file",
+    "risk": "safe",
+    "description": "Open an email for the prepared typist file."
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "print_typist_file",
+    "risk": "safe",
+    "description": "Print the prepared typist file."
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "review_typist_send",
+    "risk": "safe",
+    "description": "Review the selected typist bundle."
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "select_typist_case",
+    "risk": "safe",
+    "description": "Select or deselect an approved report."
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "send_to_typist",
+    "risk": "confirm",
+    "description": "Send selected reports and prepare the typist file."
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "share_typist_file",
+    "risk": "safe",
+    "description": "Share the prepared typist file."
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "whatsapp_typist_file",
+    "risk": "safe",
+    "description": "Open WhatsApp for the prepared typist file."
+  },
+  {
+    "screen": "typist_check",
+    "id": "check_typist",
+    "risk": "confirm",
+    "description": "Compare typed report with the approved report."
+  },
+  {
+    "screen": "typist_check",
+    "id": "compare_typist",
+    "risk": "confirm",
+    "description": "Compare typist report"
+  },
+  {
+    "screen": "typist_check",
+    "id": "deliver_case",
+    "risk": "confirm",
+    "description": "Deliver and lock a matching report, or use an override reason."
+  },
+  {
+    "screen": "typist_check",
+    "id": "edit_typist_report",
+    "risk": "safe",
+    "description": "Return to typist report editing."
+  },
+  {
+    "screen": "typist_check",
+    "id": "enter_typist_review",
+    "risk": "safe",
+    "description": "Read typed report aloud before comparison."
+  },
+  {
+    "screen": "typist_check",
+    "id": "open_override",
+    "risk": "safe",
+    "description": "Open or close delivery override controls."
+  },
+  {
+    "screen": "typist_check",
+    "id": "send_back_typist",
+    "risk": "confirm",
+    "description": "Return listed corrections to typist."
+  },
+  {
+    "screen": "typist_check",
+    "id": "set_override_reason",
+    "risk": "safe",
+    "description": "Set the delivery override reason."
+  },
+  {
+    "screen": "typist_check",
+    "id": "set_typed_report",
+    "risk": "safe",
+    "description": "Set or append typist report text."
+  },
+  {
+    "screen": "typist_check",
+    "id": "upload_typed_report",
+    "risk": "safe",
+    "description": "Load typed report text from a txt or docx file."
+  },
+  {
+    "screen": "voice_help",
+    "id": "filter_voice_help",
+    "risk": "safe",
+    "description": "Filter the voice phrase guide."
+  },
+  {
+    "screen": "worklist",
+    "id": "cancel_intake_pending",
+    "risk": "safe",
+    "description": "Cancel the pending intake read-back and edit it."
+  },
+  {
+    "screen": "worklist",
+    "id": "close_consultant_send",
+    "risk": "safe",
+    "description": "Close consultant selection."
+  },
+  {
+    "screen": "worklist",
+    "id": "close_intake",
+    "risk": "safe",
+    "description": "Close case intake."
+  },
+  {
+    "screen": "worklist",
+    "id": "confirm_intake",
+    "risk": "safe",
+    "description": "Confirm the intake read-back."
+  },
+  {
+    "screen": "worklist",
+    "id": "create_batch",
+    "risk": "confirm",
+    "description": "Create independent cases under one batch label."
+  },
+  {
+    "screen": "worklist",
+    "id": "create_case",
+    "risk": "confirm",
+    "description": "Create a single independent case."
+  },
+  {
+    "screen": "worklist",
+    "id": "next_case",
+    "risk": "safe",
+    "description": "Open the next gross case in the active worklist filter."
+  },
+  {
+    "screen": "worklist",
+    "id": "open_consultant_send",
+    "risk": "safe",
+    "description": "Open consultant bulk selection."
+  },
+  {
+    "screen": "worklist",
+    "id": "open_intake",
+    "risk": "safe",
+    "description": "Open single-case or batch intake."
+  },
+  {
+    "screen": "worklist",
+    "id": "select_consultant_case",
+    "risk": "safe",
+    "description": "Select or deselect a case for consultant."
+  },
+  {
+    "screen": "worklist",
+    "id": "send_to_consultant",
+    "risk": "confirm",
+    "description": "Send selected ready cases to consultant."
+  },
+  {
+    "screen": "worklist",
+    "id": "set_filter",
+    "risk": "safe",
+    "description": "Filter the worklist."
+  },
+  {
+    "screen": "worklist",
+    "id": "set_intake_field",
+    "risk": "safe",
+    "description": "Set a case intake field."
+  }
+]

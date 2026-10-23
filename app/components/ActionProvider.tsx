@@ -28,6 +28,7 @@ type ActionRuntime = {
     screenId: string;
     screenState: Record<string, unknown>;
     actions: ActionManifest[];
+    dictationTarget?: string | null;
   };
 };
 
@@ -114,11 +115,18 @@ export function ActionProvider({ children }: { children: React.ReactNode }) {
       (registration) => registration.actions,
     );
     const available = new Map<string, AnyAction>();
-    for (const action of [...global, ...(screen?.actions || [])])
+    for (const action of screen?.actions || [])
       available.set(action.id, action);
+    for (const action of global)
+      if (!available.has(action.id)) available.set(action.id, action);
+    const screenState = screen?.getScreenState() || { screenId };
     return {
       screenId,
-      screenState: screen?.getScreenState() || { screenId },
+      screenState,
+      dictationTarget:
+        typeof screenState.dictationTarget === "string"
+          ? screenState.dictationTarget
+          : null,
       actions: Array.from(available.values()).map(actionManifest),
     };
   }, []);

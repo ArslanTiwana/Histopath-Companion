@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { isAuthenticated } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { assertNoPatientIdentifiers } from "@/src/lib/privacy";
+import { specimenSlug } from "@/lib/specimens";
 
 const templateSchema = z.object({
   id: z.number().int().positive().optional(),
@@ -49,12 +50,15 @@ export async function POST(request: Request) {
   }
   const data = {
     kind: parsed.data.kind,
-    specimenType: parsed.data.specimenType,
+    specimenType: specimenSlug(parsed.data.specimenType),
     schema: parsed.data.schema as unknown as Prisma.InputJsonObject,
     defaultText: parsed.data.defaultText || null,
   };
   const template = parsed.data.id
-    ? await prisma.template.update({ where: { id: parsed.data.id }, data })
+    ? await prisma.template.update({
+        where: { id: parsed.data.id },
+        data: { ...data, version: { increment: 1 } },
+      })
     : await prisma.template.upsert({
         where: {
           kind_specimenType: {

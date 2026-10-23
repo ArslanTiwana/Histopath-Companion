@@ -4,7 +4,11 @@ export type GrossField = {
   question: string;
   placeholder: string;
 };
-export type GrossTemplate = { name: string; fields: GrossField[] };
+export type GrossTemplate = {
+  name: string;
+  fields: GrossField[];
+  defaultText?: string;
+};
 
 const common = (extras: GrossField[]): GrossField[] => [
   {
@@ -23,7 +27,7 @@ const common = (extras: GrossField[]): GrossField[] => [
 ];
 
 export const GROSS_TEMPLATES: Record<string, GrossTemplate> = {
-  Appendix: {
+  appendix: {
     name: "Appendix",
     fields: common([
       {
@@ -52,7 +56,7 @@ export const GROSS_TEMPLATES: Record<string, GrossTemplate> = {
       },
     ]),
   },
-  Gallbladder: {
+  gallbladder: {
     name: "Gallbladder",
     fields: common([
       {
@@ -81,7 +85,7 @@ export const GROSS_TEMPLATES: Record<string, GrossTemplate> = {
       },
     ]),
   },
-  "Skin ellipse": {
+  "skin-ellipse": {
     name: "Skin ellipse",
     fields: common([
       {
@@ -104,7 +108,7 @@ export const GROSS_TEMPLATES: Record<string, GrossTemplate> = {
       },
     ]),
   },
-  Colon: {
+  colon: {
     name: "Colon",
     fields: common([
       {
@@ -133,7 +137,7 @@ export const GROSS_TEMPLATES: Record<string, GrossTemplate> = {
       },
     ]),
   },
-  Breast: {
+  breast: {
     name: "Breast",
     fields: common([
       {
@@ -162,7 +166,7 @@ export const GROSS_TEMPLATES: Record<string, GrossTemplate> = {
       },
     ]),
   },
-  Prostate: {
+  prostate: {
     name: "Prostate",
     fields: common([
       {
@@ -191,7 +195,7 @@ export const GROSS_TEMPLATES: Record<string, GrossTemplate> = {
       },
     ]),
   },
-  Other: {
+  other: {
     name: "Other",
     fields: common([
       {
@@ -210,12 +214,29 @@ export const GROSS_TEMPLATES: Record<string, GrossTemplate> = {
   },
 };
 
-export const SPECIMEN_TYPES = Object.keys(GROSS_TEMPLATES);
+// Read compatibility for records created before specimen slugs were introduced.
+GROSS_TEMPLATES.Appendix = GROSS_TEMPLATES.appendix;
+GROSS_TEMPLATES.Gallbladder = GROSS_TEMPLATES.gallbladder;
+GROSS_TEMPLATES["Skin ellipse"] = GROSS_TEMPLATES["skin-ellipse"];
+GROSS_TEMPLATES.Colon = GROSS_TEMPLATES.colon;
+GROSS_TEMPLATES.Breast = GROSS_TEMPLATES.breast;
+GROSS_TEMPLATES.Prostate = GROSS_TEMPLATES.prostate;
+GROSS_TEMPLATES.Other = GROSS_TEMPLATES.other;
+
+export const SPECIMEN_TYPES = [
+  "appendix",
+  "gallbladder",
+  "skin-ellipse",
+  "colon",
+  "breast",
+  "prostate",
+  "other",
+];
 export function buildGrossDescription(
   specimen: string,
   fields: Record<string, string>,
 ): string {
-  const template = GROSS_TEMPLATES[specimen] || GROSS_TEMPLATES.Other;
+  const template = GROSS_TEMPLATES[specimen] || GROSS_TEMPLATES.other;
   const details = template.fields
     .filter((field) => fields[field.key]?.trim())
     .map((field) => `${field.label}: ${fields[field.key].trim()}`);

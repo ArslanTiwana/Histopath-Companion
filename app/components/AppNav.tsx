@@ -17,7 +17,6 @@ export default function AppNav({ active = "worklist" }: { active?: string }) {
         className={active === "worklist" ? "active" : ""}
         href="/"
       >
-        <span>▤</span>
         Worklist
       </Link>
       <Link
@@ -26,7 +25,6 @@ export default function AppNav({ active = "worklist" }: { active?: string }) {
         className={active === "cases" ? "active" : ""}
         href="/cases"
       >
-        <span>□</span>
         Cases
       </Link>
       <Link
@@ -35,7 +33,6 @@ export default function AppNav({ active = "worklist" }: { active?: string }) {
         className={active === "learn" ? "active" : ""}
         href="/learned"
       >
-        <span>◇</span>
         Learn
       </Link>
       <Link
@@ -44,7 +41,6 @@ export default function AppNav({ active = "worklist" }: { active?: string }) {
         className={active === "settings" ? "active" : ""}
         href="/settings"
       >
-        <span>⚙</span>
         Settings
       </Link>
     </nav>

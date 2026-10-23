@@ -42,4 +42,24 @@ describe("apiFetch", () => {
       kind: "network",
     });
   });
+
+  it("bounds requests so a screen cannot wait forever", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      ),
+    );
+    await expect(apiFetch("/api/test", { timeoutMs: 5 })).rejects.toMatchObject(
+      {
+        kind: "network",
+        message: expect.stringContaining("taking too long"),
+      },
+    );
+  });
 });

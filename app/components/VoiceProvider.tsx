@@ -12,6 +12,8 @@ import {
 import { defineAction, type AnyAction } from "@/lib/actions";
 import { apiFetch } from "@/lib/api-fetch";
 import { normalizeCaseLabel } from "@/src/lib/voice/parser";
+import { addVoiceVocabularyWord } from "@/lib/voice-vocabulary";
+import VoiceBar from "@/app/components/VoiceBar";
 
 type VoiceContextValue = {
   state: VoiceState;
@@ -26,6 +28,12 @@ type VoiceContextValue = {
   submitTypedCommand: (text: string) => Promise<void>;
   setHeadsetMode: (value: boolean) => void;
   speak: (text: string) => Promise<void>;
+  latency: {
+    transcribe: number;
+    route: number;
+    action: number;
+    total: number;
+  } | null;
 };
 
 const VoiceContext = createContext<VoiceContextValue | null>(null);
@@ -56,6 +64,92 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const globalActions = useMemo<AnyAction[]>(
     () => [
+      defineAction({
+        id: "retry_screen",
+        description: "Reload the current screen after an error.",
+        args: z.object({}),
+        screens: ["global"],
+        risk: "safe",
+        describe: () => "Retry this screen",
+        run: () => window.location.reload(),
+      }),
+      defineAction({
+        id: "add_vocabulary_word",
+        description: "Add a word to the speech vocabulary.",
+        args: z.object({ word: z.string().trim().min(1).max(80) }),
+        screens: ["global"],
+        risk: "safe",
+        describe: ({ word }) => `Add ${word} to vocabulary`,
+        run: ({ word }) => {
+          addVoiceVocabularyWord(word);
+          return { readBackText: `${word} was added to the vocabulary.` };
+        },
+      }),
+      defineAction({
+        id: "answer_current_question",
+        description: "Answer the current screen question or dictation target.",
+        args: z.object({ value: z.string().trim().min(1) }),
+        screens: ["global"],
+        risk: "safe",
+        describe: ({ value }) => `Answer with ${value}`,
+        run: async ({ value }, ctx) => {
+          const target = actionRuntime.routerContext().dictationTarget;
+          const map: Record<
+            string,
+            { id: string; args: Record<string, unknown> }
+          > = {
+            gross_question: { id: "answer_gross_question", args: { value } },
+            provisional_diagnosis: {
+              id: "set_provisional_diagnosis",
+              args: { value },
+            },
+            micro_findings: { id: "set_micro_findings", args: { value } },
+            consultant_dictation: {
+              id: "dictate_consultant",
+              args: { text: value },
+            },
+            typed_report: { id: "set_typed_report", args: { value } },
+            reminder_text: { id: "set_reminder_fields", args: { text: value } },
+            bypass_reason: { id: "set_bypass_reason", args: { reason: value } },
+          };
+          const mapped = target ? map[target] : undefined;
+          if (mapped) return actionRuntime.run(mapped.id, mapped.args, ctx);
+          throw new Error("There is no active dictation target.");
+        },
+      }),
+      defineAction({
+        id: "append_dictation",
+        description: "Append speech to the current dictation target.",
+        args: z.object({ text: z.string().trim().min(1) }),
+        screens: ["global"],
+        risk: "safe",
+        describe: ({ text }) => `Add ${text}`,
+        run: async ({ text }, ctx) => {
+          const target = actionRuntime.routerContext().dictationTarget;
+          const map: Record<
+            string,
+            { id: string; args: Record<string, unknown> }
+          > = {
+            micro_findings: {
+              id: "set_micro_findings",
+              args: { value: text, append: true },
+            },
+            consultant_dictation: { id: "dictate_consultant", args: { text } },
+            typed_report: {
+              id: "set_typed_report",
+              args: { value: text, append: true },
+            },
+            reminder_text: {
+              id: "set_reminder_fields",
+              args: { text, append: true },
+            },
+            bypass_reason: { id: "set_bypass_reason", args: { reason: text } },
+          };
+          const mapped = target ? map[target] : undefined;
+          if (mapped) return actionRuntime.run(mapped.id, mapped.args, ctx);
+          throw new Error("There is no active dictation target.");
+        },
+      }),
       defineAction({
         id: "start_listening",
         description: "Start the hands-free voice session.",
@@ -231,8 +325,16 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
                   ))}
                 </div>
               )}
+              {expanded && (
+                <VoiceBar submitTypedCommand={voice.submitTypedCommand} />
+              )}
               {voice.notice && (
                 <div className="floating-voice-notice">{voice.notice}</div>
+              )}
+              {process.env.NODE_ENV === "development" && voice.latency && (
+                <div className="floating-voice-notice" aria-live="polite">
+                  {`Latency: transcribe ${voice.latency.transcribe}ms, route ${voice.latency.route}ms, action ${voice.latency.action}ms, total ${voice.latency.total}ms`}
+                </div>
               )}
             </div>
           )}
@@ -252,7 +354,23 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
             aria-pressed={voice.active}
             data-action={voice.active ? "stop_listening" : "start_listening"}
           >
-            {voice.active ? "■" : "🎙"}
+            {voice.active ? (
+              <span className="stop-listening-icon" aria-hidden="true" />
+            ) : (
+              <svg
+                aria-hidden="true"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <rect x="9" y="3" width="6" height="12" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+              </svg>
+            )}
           </button>
         </aside>
       )}

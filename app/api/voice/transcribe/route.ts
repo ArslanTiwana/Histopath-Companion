@@ -27,13 +27,20 @@ export async function POST(request: Request) {
     );
   const audio = parsed.data;
   try {
-    const transcript = await transcribe(audio);
+    const vocabulary = z
+      .string()
+      .trim()
+      .max(4000)
+      .optional()
+      .parse(form?.get("vocabulary") || undefined);
+    const result = await transcribe(audio, vocabulary);
+    const transcript = result.text;
     if (containsPatientIdentifier(transcript))
       return NextResponse.json(
         { error: PATIENT_IDENTIFIER_MESSAGE },
         { status: 400 },
       );
-    return NextResponse.json({ transcript });
+    return NextResponse.json({ transcript, confidence: result.confidence });
   } catch (error) {
     if (error instanceof AiBusyError)
       return NextResponse.json(

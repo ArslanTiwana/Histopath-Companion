@@ -4,6 +4,7 @@ import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
+import { LoadingState } from "@/app/components/ScreenState";
 import { apiFetch } from "@/lib/api-fetch";
 import { localDateKey } from "@/lib/local-date";
 import { useVoice } from "@/app/components/VoiceProvider";
@@ -26,6 +27,49 @@ export default function SettingsPage() {
   const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
   const [message, setMessage] = useState("");
+  const [voiceSettings, setVoiceSettings] = useState(() => ({
+    silenceMs:
+      Number(
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem("histopath_voice_silence_ms")
+          : 1000,
+      ) || 1000,
+    idleMinutes: Math.round(
+      (Number(
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem("histopath_voice_idle_ms")
+          : 120000,
+      ) || 120000) / 60000,
+    ),
+    rate:
+      Number(
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem("histopath_voice_rate")
+          : 1,
+      ) || 1,
+    voice:
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem("histopath_voice_name") || ""
+        : "",
+    transcript:
+      typeof localStorage === "undefined" ||
+      localStorage.getItem("histopath_voice_transcript") !== "off",
+  }));
+  const setVoiceSetting = (key: string, value: string) => {
+    localStorage.setItem(key, value);
+    setVoiceSettings((current) => ({
+      ...current,
+      ...(key === "histopath_voice_silence_ms"
+        ? { silenceMs: Number(value) }
+        : key === "histopath_voice_idle_ms"
+          ? { idleMinutes: Number(value) / 60000 }
+          : key === "histopath_voice_rate"
+            ? { rate: Number(value) }
+            : key === "histopath_voice_name"
+              ? { voice: value }
+              : { transcript: value !== "off" }),
+    }));
+  };
   useEffect(() => {
     apiFetch<Settings>("/api/settings").then(setData);
   }, []);
@@ -43,6 +87,55 @@ export default function SettingsPage() {
     }
   }
   const screenActions: AnyAction[] = [
+    defineAction({
+      id: "set_voice_silence",
+      description: "Set voice silence length in milliseconds.",
+      args: z.object({ milliseconds: z.number().int().min(300).max(5000) }),
+      screens: ["settings"],
+      risk: "safe",
+      describe: ({ milliseconds }) =>
+        `Set silence to ${milliseconds} milliseconds`,
+      run: ({ milliseconds }) =>
+        setVoiceSetting("histopath_voice_silence_ms", String(milliseconds)),
+    }),
+    defineAction({
+      id: "set_voice_auto_stop",
+      description: "Set voice auto-stop minutes.",
+      args: z.object({ minutes: z.number().int().min(1).max(30) }),
+      screens: ["settings"],
+      risk: "safe",
+      describe: ({ minutes }) => `Set auto stop to ${minutes} minutes`,
+      run: ({ minutes }) =>
+        setVoiceSetting("histopath_voice_idle_ms", String(minutes * 60000)),
+    }),
+    defineAction({
+      id: "set_speech_voice",
+      description: "Select the speech voice.",
+      args: z.object({ name: z.string() }),
+      screens: ["settings"],
+      risk: "safe",
+      describe: ({ name }) => `Use voice ${name}`,
+      run: ({ name }) => setVoiceSetting("histopath_voice_name", name),
+    }),
+    defineAction({
+      id: "set_speech_rate",
+      description: "Set speech rate.",
+      args: z.object({ rate: z.number().min(0.5).max(2) }),
+      screens: ["settings"],
+      risk: "safe",
+      describe: ({ rate }) => `Set speech rate to ${rate}`,
+      run: ({ rate }) => setVoiceSetting("histopath_voice_rate", String(rate)),
+    }),
+    defineAction({
+      id: "set_transcript_visibility",
+      description: "Turn transcript display on or off.",
+      args: z.object({ enabled: z.boolean() }),
+      screens: ["settings"],
+      risk: "safe",
+      describe: ({ enabled }) => `${enabled ? "Show" : "Hide"} transcripts`,
+      run: ({ enabled }) =>
+        setVoiceSetting("histopath_voice_transcript", enabled ? "on" : "off"),
+    }),
     defineAction({
       id: "set_overdue_days",
       description: "Set the overdue threshold.",
@@ -91,9 +184,15 @@ export default function SettingsPage() {
     screenId: "settings",
     overdueDays: data?.overdueDays,
     headsetMode: voice.headsetMode,
+    voiceSettings,
     modal: null,
   }));
-  if (!data) return <main className="app-shell">Loading settings…</main>;
+  if (!data)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading settings" />
+      </main>
+    );
   return (
     <main className="app-shell">
       <div className="eyebrow">PRIVATE APP SETTINGS</div>
@@ -135,6 +234,80 @@ export default function SettingsPage() {
             checked={voice.headsetMode}
             onChange={(event) =>
               void actions.run("set_headset_mode", {
+                enabled: event.target.checked,
+              })
+            }
+          />
+        </label>
+      </section>
+      <section className="detail-card form-stack">
+        <h3>Voice</h3>
+        <label className="field-label">
+          Silence length (ms)
+          <input
+            type="number"
+            min="300"
+            max="5000"
+            data-action="set_voice_silence"
+            value={voiceSettings.silenceMs}
+            onChange={(event) =>
+              void actions.run("set_voice_silence", {
+                milliseconds: Number(event.target.value),
+              })
+            }
+          />
+        </label>
+        <label className="field-label">
+          Auto-stop (minutes)
+          <input
+            type="number"
+            min="1"
+            max="30"
+            data-action="set_voice_auto_stop"
+            value={voiceSettings.idleMinutes}
+            onChange={(event) =>
+              void actions.run("set_voice_auto_stop", {
+                minutes: Number(event.target.value),
+              })
+            }
+          />
+        </label>
+        <label className="field-label">
+          Speech rate
+          <input
+            type="number"
+            min="0.5"
+            max="2"
+            step="0.1"
+            data-action="set_speech_rate"
+            value={voiceSettings.rate}
+            onChange={(event) =>
+              void actions.run("set_speech_rate", {
+                rate: Number(event.target.value),
+              })
+            }
+          />
+        </label>
+        <label className="field-label">
+          Speech voice
+          <input
+            type="text"
+            data-action="set_speech_voice"
+            value={voiceSettings.voice}
+            placeholder="Default"
+            onChange={(event) =>
+              void actions.run("set_speech_voice", { name: event.target.value })
+            }
+          />
+        </label>
+        <label className="setting-toggle">
+          <span>Show transcripts</span>
+          <input
+            type="checkbox"
+            data-action="set_transcript_visibility"
+            checked={voiceSettings.transcript}
+            onChange={(event) =>
+              void actions.run("set_transcript_visibility", {
                 enabled: event.target.checked,
               })
             }
@@ -191,6 +364,9 @@ export default function SettingsPage() {
         </p>
       </section>
       <div className="settings-links">
+        <Link data-action="navigate" href="/voice-help">
+          How to talk to the app <span>›</span>
+        </Link>
         <Link data-action="navigate" href="/settings/templates">
           Manage templates <span>›</span>
         </Link>

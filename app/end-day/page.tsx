@@ -4,6 +4,7 @@ import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
+import { LoadingState } from "@/app/components/ScreenState";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import {
@@ -14,6 +15,7 @@ import {
   type PendingActionResponse,
 } from "@/lib/client-actions";
 import { localDateKey } from "@/lib/local-date";
+import { parseReminderCommand } from "@/lib/reminders";
 import { useRegisterActions } from "@/app/components/ActionProvider";
 import { defineAction, type AnyAction } from "@/lib/actions";
 
@@ -34,6 +36,7 @@ export default function EndDayPage() {
   const [data, setData] = useState<Summary | null>(null);
   const [text, setText] = useState("");
   const [when, setWhen] = useState("tomorrow");
+  const [reminderCaseId, setReminderCaseId] = useState<number | undefined>();
   const [review, setReview] = useState(false);
   const [reminderPending, setReminderPending] =
     useState<PendingActionResponse | null>(null);
@@ -53,6 +56,7 @@ export default function EndDayPage() {
         await prepareAction("create_reminder", {
           text,
           when,
+          caseId: reminderCaseId,
           source,
         }),
       );
@@ -68,6 +72,7 @@ export default function EndDayPage() {
     try {
       await confirmAction(reminderPending.token);
       setText("");
+      setReminderCaseId(undefined);
       setReminderPending(null);
       setMessage("Reminder saved");
       await load();
@@ -96,11 +101,14 @@ export default function EndDayPage() {
       void actions.run("review_close_day", {}, { source: "voice" });
       return;
     }
-    const reminder = value.match(/remind me\s+(.+)/i);
+    const reminder = parseReminderCommand(value);
     if (reminder) {
+      const linked = reminder.label
+        ? data?.carry.find((item) => item.caseLabel === reminder.label)
+        : undefined;
       void actions.run(
-        "set_reminder_fields",
-        { when: reminder[1], text: "Follow up" },
+        "create_reminder",
+        { when: reminder.when, text: reminder.text, caseId: linked?.id },
         { source: "voice" },
       );
     }
@@ -113,13 +121,15 @@ export default function EndDayPage() {
       args: z.object({
         text: z.string().optional(),
         when: z.string().optional(),
+        caseId: z.number().int().positive().optional(),
       }),
       screens: ["end_day"],
       risk: "safe",
       describe: () => "Edit reminder",
-      run: ({ text: nextText, when: nextWhen }) => {
+      run: ({ text: nextText, when: nextWhen, caseId }) => {
         if (nextText !== undefined) setText(nextText);
         if (nextWhen !== undefined) setWhen(nextWhen);
+        if (caseId !== undefined) setReminderCaseId(caseId);
       },
     }),
     defineAction({
@@ -137,14 +147,17 @@ export default function EndDayPage() {
       args: z.object({
         text: z.string().optional(),
         when: z.string().optional(),
+        caseId: z.number().int().positive().optional(),
       }),
       screens: ["end_day"],
       risk: "confirm",
-      describe: () => `Save reminder ${text} for ${when}`,
-      run: async ({ text: nextText, when: nextWhen }, ctx) => {
+      describe: ({ text: nextText, when: nextWhen }) =>
+        `Save reminder ${nextText || text} for ${nextWhen || when}`,
+      run: async ({ text: nextText, when: nextWhen, caseId }, ctx) => {
         if (reminderPending) return addReminder();
         if (ctx.confirmed)
           return runConfirmedAction("create_reminder", {
+            caseId: caseId || reminderCaseId,
             text: nextText || text,
             when: nextWhen || when,
             source: ctx.source,
@@ -184,6 +197,18 @@ export default function EndDayPage() {
       },
     }),
     defineAction({
+      id: "delete_reminder",
+      description: "Delete a reminder.",
+      args: z.object({ id: z.number().int().positive() }),
+      screens: ["end_day"],
+      risk: "confirm",
+      describe: () => "Delete reminder",
+      run: async ({ id }, ctx) => {
+        await runConfirmedAction("delete_reminder", { id, source: ctx.source });
+        await load();
+      },
+    }),
+    defineAction({
       id: "review_close_day",
       description: "Open the close-day read-back.",
       args: z.object({}),
@@ -214,6 +239,7 @@ export default function EndDayPage() {
   const actions = useRegisterActions("end_day", screenActions, () => ({
     screenId: "end_day",
     reminder: { text, when },
+    dictationTarget: "reminder_text",
     pendingReminder: reminderPending?.readBackText || null,
     modal: review ? "close_day" : null,
     counts: data
@@ -221,7 +247,12 @@ export default function EndDayPage() {
       : null,
   }));
 
-  if (!data) return <main className="app-shell">Loading summary…</main>;
+  if (!data)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading end-of-day summary" />
+      </main>
+    );
   return (
     <main className="app-shell">
       <Link data-action="navigate" href="/" className="back">
@@ -317,6 +348,14 @@ export default function EndDayPage() {
               }
             >
               Done
+            </button>
+            <button
+              data-action="delete_reminder"
+              onClick={() =>
+                void actions.run("delete_reminder", { id: item.id })
+              }
+            >
+              Delete
             </button>
           </div>
         ))}

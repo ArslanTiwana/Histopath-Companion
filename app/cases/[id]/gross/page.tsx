@@ -9,12 +9,14 @@ import {
 } from "@/src/lib/gross/templates";
 import HelpPanel from "@/app/components/HelpPanel";
 import AppNav from "@/app/components/AppNav";
+import { LoadingState } from "@/app/components/ScreenState";
 import BypassStepModal from "@/app/components/BypassStepModal";
 import DictationButton from "@/app/components/DictationButton";
 import { useRegisterActions } from "@/app/components/ActionProvider";
 import { defineAction, type AnyAction } from "@/lib/actions";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
+import { specimenName } from "@/lib/specimens";
 import {
   previousGrossForSpecimen,
   type PreviousGross,
@@ -51,11 +53,21 @@ export default function GrossPage({ params }: { params: { id: string } }) {
         setSpecimen(value.case.specimenType || "");
       },
     );
-    apiFetch<{ kind: string; specimenType: string; schema: unknown }[]>(
-      "/api/templates",
-    ).then(
+    apiFetch<
+      {
+        kind: string;
+        specimenType: string;
+        schema: unknown;
+        defaultText: string | null;
+      }[]
+    >("/api/templates").then(
       (
-        templates: { kind: string; specimenType: string; schema: unknown }[],
+        templates: {
+          kind: string;
+          specimenType: string;
+          schema: unknown;
+          defaultText: string | null;
+        }[],
       ) => {
         const managed: Record<string, GrossTemplate> = {};
         for (const item of templates) {
@@ -70,6 +82,7 @@ export default function GrossPage({ params }: { params: { id: string } }) {
             managed[item.specimenType] = {
               name: value.name || item.specimenType,
               fields: value.fields,
+              defaultText: item.defaultText || undefined,
             };
         }
         setManagedTemplates(managed);
@@ -79,14 +92,15 @@ export default function GrossPage({ params }: { params: { id: string } }) {
   const template = specimen
     ? managedTemplates[specimen] ||
       GROSS_TEMPLATES[specimen] ||
-      GROSS_TEMPLATES.Other
+      GROSS_TEMPLATES.other
     : null;
   const description = useMemo(() => {
     if (!specimen || !template) return "";
     const details = template.fields
       .filter((field) => fields[field.key]?.trim())
       .map((field) => `${field.label}: ${fields[field.key].trim()}`);
-    return `${specimen} specimen. ${details.join(". ")}${details.length ? "." : ""}`;
+    const seeded = template.defaultText?.trim();
+    return `${seeded ? `${seeded} ` : `${specimen} specimen. `}${details.join(". ")}${details.length ? "." : ""}`;
   }, [specimen, fields, template]);
   const specimenTypes = Array.from(
     new Set([...SPECIMEN_TYPES, ...Object.keys(managedTemplates)]),
@@ -372,11 +386,21 @@ export default function GrossPage({ params }: { params: { id: string } }) {
     caseLabel: data?.case.caseLabel,
     specimen,
     currentQuestion: template?.fields[index]?.question,
+    dictationTarget: bypass
+      ? "bypass_reason"
+      : template?.fields[index]?.question
+        ? "gross_question"
+        : null,
     fields,
     mode,
     modal: helpOpen ? "help" : bypass ? `bypass_${bypass}` : null,
   }));
-  if (!data) return <main className="app-shell">Loading…</main>;
+  if (!data)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading grossing" />
+      </main>
+    );
   if (data.case.status !== "gross_pending")
     return (
       <main className="app-shell">
@@ -439,7 +463,7 @@ export default function GrossPage({ params }: { params: { id: string } }) {
                 void actions.run("set_specimen", { specimen: type })
               }
             >
-              {type}
+              {specimenName(type)}
             </button>
           ))}
         </div>

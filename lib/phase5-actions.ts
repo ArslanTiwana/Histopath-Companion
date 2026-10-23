@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import { prisma } from "./db";
 import { transitionCase } from "./status";
 import { applyReportTemplate } from "./report-templates";
+import { CRITICAL_TYPIST_FIELDS } from "./typist-config";
 
 export const diagnosisFieldsSchema = z.object({
   diagnosis: z.string().trim().min(2),
@@ -138,6 +138,10 @@ export async function saveConsultantEntry(
         learnedNote: differences.length ? input.learnedNote || null : null,
       },
     });
+    await tx.case.update({
+      where: { id: caseId },
+      data: { waitingIhc: false },
+    });
     await transitionCase(
       {
         caseId,
@@ -197,7 +201,7 @@ export async function generateReport(caseId: number) {
               specimenType: item.specimenType,
             },
           },
-          select: { id: true, schema: true, defaultText: true },
+          select: { id: true, schema: true, defaultText: true, version: true },
         })
       : null;
     const fallbackTemplate = exactTemplate
@@ -208,12 +212,20 @@ export async function generateReport(caseId: number) {
             specimenType: { in: ["Default", "Other"] },
           },
           orderBy: { specimenType: "asc" },
-          select: { id: true, schema: true, defaultText: true },
+          select: { id: true, schema: true, defaultText: true, version: true },
         });
     const template = exactTemplate || fallbackTemplate;
     const content = applyReportTemplate(source, template);
     const report = await tx.report.create({
-      data: { caseId, content, templateId: template?.id || null },
+      data: {
+        caseId,
+        content,
+        templateId: template?.id || null,
+        templateVersion: template?.version || null,
+        templateSnapshot: template
+          ? { schema: template.schema, defaultText: template.defaultText }
+          : undefined,
+      },
     });
     await transitionCase(
       {
@@ -330,15 +342,7 @@ export function compareTypedReport(
   typedText: string,
 ) {
   const typed = parseTypedReport(typedText);
-  const fields = [
-    "laterality",
-    "diagnosis",
-    "grade",
-    "tumourSize",
-    "stage",
-    "margins",
-  ];
-  return fields.map((field) => {
+  return CRITICAL_TYPIST_FIELDS.map((field) => {
     const expected = approved[field] || "Not recorded";
     const actual = typed[field] || "Missing";
     const matches =
@@ -354,7 +358,12 @@ export function compareTypedReport(
       matches,
       ...(digitsLookSwapped(expected, actual)
         ? { hint: "Digits look swapped" }
-        : {}),
+        : normalizeClinicalValue(expected).includes("left") !==
+              normalizeClinicalValue(actual).includes("left") ||
+            normalizeClinicalValue(expected).includes("right") !==
+              normalizeClinicalValue(actual).includes("right")
+          ? { hint: "Laterality differs" }
+          : {}),
     };
   });
 }
@@ -363,6 +372,7 @@ export async function sendApprovedReports(
   caseIds: number[] | undefined,
   localDate: string,
 ) {
+  const { Document, HeadingLevel, Packer, Paragraph } = await import("docx");
   const cases = await prisma.case.findMany({
     where: {
       status: "report_approved",

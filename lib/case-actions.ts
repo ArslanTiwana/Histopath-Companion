@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { specimenSlug } from "./specimens";
 const steps = [
   "gross",
   "micro",
@@ -20,10 +21,18 @@ export async function createSingleCase(
   priority: "routine" | "urgent" = "routine",
   source: "tap" | "voice" = "tap",
 ) {
+  const slug = specimen ? specimenSlug(specimen) : null;
+  const template = slug
+    ? await prisma.template.findUnique({
+        where: { kind_specimenType: { kind: "gross", specimenType: slug } },
+        select: { id: true },
+      })
+    : null;
   return prisma.case.create({
     data: {
       caseLabel: label,
-      specimenType: specimen || null,
+      specimenType: slug,
+      specimenTemplateId: template?.id || null,
       priority,
       steps: { create: steps.map((step) => ({ step })) },
       events: {

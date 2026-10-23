@@ -9,7 +9,14 @@ export type RouterContext = {
   screenId: string;
   screenState: Record<string, unknown>;
   actions: RouterAction[];
-  lastTurns: string[];
+  lastTurns: ConversationTurn[];
+  dictationTarget?: string | null;
+};
+
+export type ConversationTurn = {
+  user?: string;
+  assistant?: string;
+  actions?: Array<{ id: string; args: Record<string, unknown> }>;
 };
 
 export type RouterActionCall = {

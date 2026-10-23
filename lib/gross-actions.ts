@@ -20,7 +20,7 @@ export async function completeGross(
     where: {
       kind_specimenType: { kind: "gross", specimenType: input.specimenType },
     },
-    select: { schema: true },
+    select: { id: true, schema: true },
   });
   const parsedManaged = z
     .object({
@@ -72,6 +72,11 @@ export async function completeGross(
       },
       tx,
     );
+    if (managed?.id)
+      await tx.case.update({
+        where: { id: caseId },
+        data: { specimenTemplateId: managed.id },
+      });
     return entry;
   });
 }

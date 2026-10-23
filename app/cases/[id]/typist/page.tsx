@@ -4,6 +4,7 @@ import Link from "@/app/components/ActionLink";
 import { useCallback, useEffect, useState } from "react";
 import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
+import { LoadingState } from "@/app/components/ScreenState";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
@@ -93,6 +94,17 @@ export default function TypistPage({ params }: { params: { id: string } }) {
       setReview(false);
     }
   }
+  async function parseAndCheck(source: "tap" | "voice") {
+    const parsed = await apiFetch<{ canonicalText: string }>(
+      `/api/cases/${params.id}/typist/parse`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: typedText }),
+      },
+    );
+    return action("check_typist", { typedText: parsed.canonicalText }, source);
+  }
   function voice(text: string) {
     const lower = text.toLowerCase();
     if (lower.includes("confirm") || lower.includes("deliver"))
@@ -107,6 +119,27 @@ export default function TypistPage({ params }: { params: { id: string } }) {
       );
   }
   const screenActions: AnyAction[] = [
+    defineAction({
+      id: "upload_typed_report",
+      description: "Load typed report text from a txt or docx file.",
+      args: z.object({
+        file: z.custom<File>(
+          (value) => typeof File !== "undefined" && value instanceof File,
+        ),
+      }),
+      screens: ["typist_check"],
+      risk: "safe",
+      describe: () => "Upload typed report",
+      run: async ({ file }) => {
+        const form = new FormData();
+        form.append("file", file);
+        const result = await apiFetch<{ text: string }>(
+          `/api/cases/${params.id}/typist/upload`,
+          { method: "POST", body: form },
+        );
+        setTypedText(result.text);
+      },
+    }),
     defineAction({
       id: "open_override",
       description: "Open or close delivery override controls.",
@@ -156,7 +189,7 @@ export default function TypistPage({ params }: { params: { id: string } }) {
       screens: ["typist_check"],
       risk: "confirm",
       describe: () => "Compare typed report",
-      run: (_args, ctx) => action("check_typist", { typedText }, ctx.source),
+      run: (_args, ctx) => parseAndCheck(ctx.source),
     }),
     defineAction({
       id: "send_back_typist",
@@ -194,12 +227,18 @@ export default function TypistPage({ params }: { params: { id: string } }) {
     screenId: "typist_check",
     caseLabel: item?.caseLabel,
     typedText,
+    dictationTarget: "typed_report",
     mode: diff.length ? "comparison" : review ? "review" : "entry",
     differences: diff.filter((row) => !row.matches).map((row) => row.label),
     overrideReason,
     modal: overrideOpen ? "delivery_override" : null,
   }));
-  if (!item) return <main className="app-shell">Loading…</main>;
+  if (!item)
+    return (
+      <main className="app-shell">
+        <LoadingState label="Loading typist check" />
+      </main>
+    );
   const differences = diff.filter((row) => !row.matches);
   return (
     <main className="app-shell">
@@ -257,6 +296,18 @@ export default function TypistPage({ params }: { params: { id: string } }) {
                   placeholder={
                     "Diagnosis: …\nGrade: …\nStage: …\nMargins: …\nLaterality: …\nTumour size: …"
                   }
+                />
+              </label>
+              <label className="field-label">
+                Upload .txt or .docx
+                <input
+                  type="file"
+                  accept=".txt,.docx"
+                  data-action="upload_typed_report"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void actions.run("upload_typed_report", { file });
+                  }}
                 />
               </label>
               <DictationButton
