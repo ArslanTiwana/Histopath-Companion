@@ -11,7 +11,8 @@ const audioSchema = z
   .instanceof(Blob)
   .refine((audio) => audio.size > 0, "Audio is required")
   .refine(
-    (audio) => /^(audio\/(webm|ogg|mp4)|video\/webm)$/.test(audio.type),
+    (audio) =>
+      /^(audio\/(?:webm|ogg|mp4)|video\/webm)(?:;.*)?$/i.test(audio.type),
     "Use a webm, ogg, or mp4 audio recording",
   );
 export async function POST(request: Request) {

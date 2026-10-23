@@ -118,6 +118,10 @@ const actionSchemas = {
     when: z.string().trim().min(2).max(100),
     source: sourceSchema,
   }),
+  complete_reminder: z.object({
+    id: z.number().int().positive(),
+    source: sourceSchema,
+  }),
   close_day: z.object({ source: sourceSchema }),
   save_help_session: z.object({
     caseId: z.number().int().positive(),
@@ -233,6 +237,7 @@ async function readBackFor(action: ConfirmedActionName, args: ActionArgs) {
     return `Unlock this delivered case because ${value.reason}?`;
   if (action === "create_reminder")
     return `Save reminder “${value.text}” for ${value.when}?`;
+  if (action === "complete_reminder") return "Mark this reminder complete?";
   if (action === "close_day") return "Close today and save the summary?";
   return `Save this ${value.contextStep} help session${value.addedNote ? " and add the selected answer to notes" : ""}?`;
 }
@@ -254,6 +259,28 @@ export async function prepareConfirmedAction(
       sessionId,
       action,
       args: args as unknown as Prisma.InputJsonValue,
+      readBackText,
+      expiresAt,
+    },
+  });
+  return { token, readBackText, expiresAt };
+}
+
+export async function prepareClientAction(
+  sessionId: string,
+  action: string,
+  args: Record<string, unknown>,
+  readBackText: string,
+) {
+  assertNoPatientIdentifiers(args);
+  const token = randomUUID();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  await prisma.pendingAction.create({
+    data: {
+      token,
+      sessionId,
+      action: `client:${action}`,
+      args: args as Prisma.InputJsonValue,
       readBackText,
       expiresAt,
     },
@@ -385,6 +412,20 @@ async function executeAction(
     });
     return reminder;
   }
+  if (action === "complete_reminder") {
+    const reminder = await prisma.reminder.update({
+      where: { id: Number(value.id) },
+      data: { done: true },
+    });
+    await prisma.event.create({
+      data: {
+        caseId: reminder.caseId,
+        type: "reminder_completed",
+        payload: { reminderId: reminder.id },
+      },
+    });
+    return reminder;
+  }
   if (action === "close_day") return closeDay();
   const [session] = await prisma.$transaction([
     prisma.helpSession.create({
@@ -422,6 +463,13 @@ export async function confirmPendingAction(sessionId: string, token?: string) {
   await prisma.pendingAction.delete({ where: { token: pending.token } });
   if (pending.expiresAt <= new Date())
     throw new Error("That confirmation expired.");
+  if (pending.action.startsWith("client:")) {
+    const action = pending.action.slice("client:".length);
+    return {
+      action,
+      result: { clientAction: { id: action, args: pending.args } },
+    };
+  }
   const action = pending.action as ConfirmedActionName;
   const args = validateAction(action, pending.args);
   checkFreeText(action, args);

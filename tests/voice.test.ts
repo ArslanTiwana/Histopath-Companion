@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   matchFastPath,
+  matchRegistryFastPath,
   normalizeCaseLabel,
   parseRange,
 } from "@/src/lib/voice/parser";
@@ -23,6 +24,11 @@ describe("case label parsing", () => {
 describe("voice fast path", () => {
   it("matches deterministic commands without AI", () =>
     expect(matchFastPath("show pending")?.tool).toBe("show_pending"));
+  it("maps fast paths to registered action ids", () =>
+    expect(matchRegistryFastPath("show pending")).toMatchObject({
+      tool: "set_filter",
+      args: { filter: "pending" },
+    }));
   it("recognizes natural case intake and extracts its details", () => {
     expect(matchFastPath("Let's add a new case")?.tool).toBe("create_case");
     expect(

@@ -1,7 +1,8 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
+import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
@@ -13,6 +14,8 @@ import {
   type PendingActionResponse,
 } from "@/lib/client-actions";
 import { localDateKey } from "@/lib/local-date";
+import { useRegisterActions } from "@/app/components/ActionProvider";
+import { defineAction, type AnyAction } from "@/lib/actions";
 
 type Summary = {
   done: number;
@@ -44,13 +47,13 @@ export default function EndDayPage() {
     void load();
   }, []);
 
-  async function reviewReminder() {
+  async function reviewReminder(source: "tap" | "voice" = "tap") {
     try {
       setReminderPending(
         await prepareAction("create_reminder", {
           text,
           when,
-          source: "tap",
+          source,
         }),
       );
     } catch (cause) {
@@ -75,9 +78,9 @@ export default function EndDayPage() {
     }
   }
 
-  async function closeDay() {
+  async function closeDay(source: "tap" | "voice" = "tap") {
     try {
-      await runConfirmedAction("close_day", { source: "tap" });
+      await runConfirmedAction("close_day", { source });
       localStorage.setItem("histopath_day_closed", localDateKey());
       setMessage("Day closed. Tomorrow's briefing is ready.");
       setReview(false);
@@ -89,18 +92,139 @@ export default function EndDayPage() {
   }
 
   function voice(value: string) {
-    if (/close day/i.test(value)) return setReview(true);
+    if (/close day/i.test(value)) {
+      void actions.run("review_close_day", {}, { source: "voice" });
+      return;
+    }
     const reminder = value.match(/remind me\s+(.+)/i);
     if (reminder) {
-      setWhen(reminder[1]);
-      setText("Follow up");
+      void actions.run(
+        "set_reminder_fields",
+        { when: reminder[1], text: "Follow up" },
+        { source: "voice" },
+      );
     }
   }
+
+  const screenActions: AnyAction[] = [
+    defineAction({
+      id: "set_reminder_fields",
+      description: "Set reminder text or date.",
+      args: z.object({
+        text: z.string().optional(),
+        when: z.string().optional(),
+      }),
+      screens: ["end_day"],
+      risk: "safe",
+      describe: () => "Edit reminder",
+      run: ({ text: nextText, when: nextWhen }) => {
+        if (nextText !== undefined) setText(nextText);
+        if (nextWhen !== undefined) setWhen(nextWhen);
+      },
+    }),
+    defineAction({
+      id: "review_reminder",
+      description: "Read back a reminder before saving.",
+      args: z.object({}),
+      screens: ["end_day"],
+      risk: "safe",
+      describe: () => "Review reminder",
+      run: (_args, ctx) => reviewReminder(ctx.source),
+    }),
+    defineAction({
+      id: "create_reminder",
+      description: "Confirm and save the pending reminder.",
+      args: z.object({
+        text: z.string().optional(),
+        when: z.string().optional(),
+      }),
+      screens: ["end_day"],
+      risk: "confirm",
+      describe: () => `Save reminder ${text} for ${when}`,
+      run: async ({ text: nextText, when: nextWhen }, ctx) => {
+        if (reminderPending) return addReminder();
+        if (ctx.confirmed)
+          return runConfirmedAction("create_reminder", {
+            text: nextText || text,
+            when: nextWhen || when,
+            source: ctx.source,
+          }).then(async () => {
+            setText("");
+            setMessage("Reminder saved");
+            await load();
+          });
+        return reviewReminder(ctx.source);
+      },
+    }),
+    defineAction({
+      id: "cancel_reminder_review",
+      description: "Cancel the reminder read-back and edit it.",
+      args: z.object({}),
+      screens: ["end_day"],
+      risk: "safe",
+      describe: () => "Edit reminder",
+      run: async () => {
+        if (reminderPending) await cancelAction(reminderPending.token);
+        setReminderPending(null);
+      },
+    }),
+    defineAction({
+      id: "complete_reminder",
+      description: "Mark a reminder complete.",
+      args: z.object({ id: z.number().int().positive() }),
+      screens: ["end_day"],
+      risk: "confirm",
+      describe: () => "Complete reminder",
+      run: async ({ id }, ctx) => {
+        await runConfirmedAction("complete_reminder", {
+          id,
+          source: ctx.source,
+        });
+        await load();
+      },
+    }),
+    defineAction({
+      id: "review_close_day",
+      description: "Open the close-day read-back.",
+      args: z.object({}),
+      screens: ["end_day"],
+      risk: "safe",
+      describe: () => "Review close day",
+      run: () => setReview(true),
+    }),
+    defineAction({
+      id: "cancel_close_day",
+      description: "Cancel close-day review.",
+      args: z.object({}),
+      screens: ["end_day"],
+      risk: "safe",
+      describe: () => "Cancel close day",
+      run: () => setReview(false),
+    }),
+    defineAction({
+      id: "close_day",
+      description: "Close today and save its summary.",
+      args: z.object({}),
+      screens: ["end_day"],
+      risk: "confirm",
+      describe: () => "Close today",
+      run: (_args, ctx) => closeDay(ctx.source),
+    }),
+  ];
+  const actions = useRegisterActions("end_day", screenActions, () => ({
+    screenId: "end_day",
+    reminder: { text, when },
+    pendingReminder: reminderPending?.readBackText || null,
+    modal: review ? "close_day" : null,
+    counts: data
+      ? { done: data.done, revisit: data.revisit, learned: data.learned }
+      : null,
+  }));
 
   if (!data) return <main className="app-shell">Loading summary…</main>;
   return (
     <main className="app-shell">
-      <Link href="/" className="back">
+      <Link data-action="navigate" href="/" className="back">
         ← Worklist
       </Link>
       <div className="eyebrow">
@@ -133,14 +257,16 @@ export default function EndDayPage() {
             <div className="gross-actions">
               <button
                 className="secondary"
-                onClick={() => {
-                  void cancelAction(reminderPending.token);
-                  setReminderPending(null);
-                }}
+                data-action="cancel_reminder_review"
+                onClick={() => void actions.run("cancel_reminder_review")}
               >
                 Edit
               </button>
-              <button className="primary" onClick={() => void addReminder()}>
+              <button
+                data-action="create_reminder"
+                className="primary"
+                onClick={() => void actions.run("create_reminder")}
+              >
                 Confirm reminder
               </button>
             </div>
@@ -148,19 +274,30 @@ export default function EndDayPage() {
         ) : (
           <>
             <input
+              data-action="set_reminder_fields"
               value={text}
-              onChange={(event) => setText(event.target.value)}
+              onChange={(event) =>
+                void actions.run("set_reminder_fields", {
+                  text: event.target.value,
+                })
+              }
               placeholder="Colon IHC"
             />
             <input
+              data-action="set_reminder_fields"
               value={when}
-              onChange={(event) => setWhen(event.target.value)}
+              onChange={(event) =>
+                void actions.run("set_reminder_fields", {
+                  when: event.target.value,
+                })
+              }
               placeholder="Thursday or 2026-10-29"
             />
             <button
               className="secondary"
+              data-action="review_reminder"
               disabled={!text.trim()}
-              onClick={() => void reviewReminder()}
+              onClick={() => void actions.run("review_reminder")}
             >
               Review and save reminder
             </button>
@@ -173,6 +310,14 @@ export default function EndDayPage() {
             <span>✓</span>
             <b>{item.case?.caseLabel || item.text}</b>
             <strong>{new Date(item.dueAt).toLocaleDateString()}</strong>
+            <button
+              data-action="complete_reminder"
+              onClick={() =>
+                void actions.run("complete_reminder", { id: item.id })
+              }
+            >
+              Done
+            </button>
           </div>
         ))}
         {data.carry.slice(0, 4).map((item) => (
@@ -194,16 +339,28 @@ export default function EndDayPage() {
             carried over.
           </p>
           <div className="gross-actions">
-            <button className="secondary" onClick={() => setReview(false)}>
+            <button
+              data-action="cancel_close_day"
+              className="secondary"
+              onClick={() => void actions.run("cancel_close_day")}
+            >
               Cancel
             </button>
-            <button className="primary" onClick={() => void closeDay()}>
+            <button
+              data-action="close_day"
+              className="primary"
+              onClick={() => void actions.run("close_day")}
+            >
               Confirm close day
             </button>
           </div>
         </section>
       ) : (
-        <button className="primary wide" onClick={() => setReview(true)}>
+        <button
+          data-action="review_close_day"
+          className="primary wide"
+          onClick={() => void actions.run("review_close_day")}
+        >
           Close day
         </button>
       )}

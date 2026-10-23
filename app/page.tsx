@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import Link from "./components/ActionLink";
+import { z } from "zod";
 import VoiceBar from "./components/VoiceBar";
 import AppNav from "./components/AppNav";
 import { apiFetch } from "@/lib/api-fetch";
@@ -13,6 +14,9 @@ import {
 } from "@/lib/client-actions";
 import { localDateKey } from "@/lib/local-date";
 import { nextGrossCase, readyConsultantCaseIds } from "@/lib/worklist";
+import { useAuthState } from "./components/AuthState";
+import { useRegisterActions } from "./components/ActionProvider";
+import { defineAction, type AnyAction } from "@/lib/actions";
 type Case = {
   id: number;
   caseLabel: string;
@@ -95,6 +99,14 @@ function Dashboard() {
   const [message, setMessage] = useState("");
   const [consultantOpen, setConsultantOpen] = useState(false);
   const [selectedConsultant, setSelectedConsultant] = useState<number[]>([]);
+  const [intakeDraft, setIntakeDraft] = useState({
+    name: "",
+    start: "",
+    end: "",
+    caseLabel: "",
+    specimenType: "",
+    priority: "routine",
+  });
   const [intakePending, setIntakePending] =
     useState<PendingActionResponse | null>(null);
   async function load() {
@@ -145,32 +157,22 @@ function Dashboard() {
     : 0;
   async function create(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.currentTarget));
-    try {
-      const pending = await prepareAction(
-        showNew === "batch" ? "create_batch" : "create_case",
-        showNew === "batch"
-          ? {
-              name:
-                String(data.name || "").trim() ||
-                `Batch ${new Date().toLocaleDateString()}`,
-              start: String(data.start || "").toUpperCase(),
-              end: String(data.end || "").toUpperCase(),
-              source: "tap",
-            }
-          : {
-              caseLabel: String(data.caseLabel || "").toUpperCase(),
-              specimenType: String(data.specimenType || "").trim() || undefined,
-              priority: data.priority,
-              source: "tap",
-            },
-      );
-      setIntakePending(pending);
-    } catch (cause) {
-      setMessage(
-        cause instanceof Error ? cause.message : "Could not prepare cases",
-      );
-    }
+    void actions.run(
+      showNew === "batch" ? "create_batch" : "create_case",
+      showNew === "batch"
+        ? {
+            name:
+              intakeDraft.name.trim() ||
+              `Batch ${new Date().toLocaleDateString()}`,
+            start: intakeDraft.start.toUpperCase(),
+            end: intakeDraft.end.toUpperCase(),
+          }
+        : {
+            caseLabel: intakeDraft.caseLabel.toUpperCase(),
+            specimenType: intakeDraft.specimenType.trim() || undefined,
+            priority: intakeDraft.priority,
+          },
+    );
   }
   async function confirmIntake() {
     if (!intakePending) return;
@@ -191,14 +193,28 @@ function Dashboard() {
     setSelectedConsultant(readyConsultantCaseIds(cases));
     setConsultantOpen(true);
   }
-  async function sendConsultant() {
+  async function sendConsultant(
+    source: "tap" | "voice" = "tap",
+    range?: { start?: string; end?: string },
+  ) {
+    const first = Number(range?.start?.match(/\d+/)?.[0]);
+    const last = Number(range?.end?.match(/\d+/)?.[0]);
+    const caseIds =
+      Number.isInteger(first) && Number.isInteger(last)
+        ? cases
+            .filter((item) => {
+              const number = Number(item.caseLabel.match(/\d+/)?.[0]);
+              return number >= first && number <= last;
+            })
+            .map((item) => item.id)
+        : selectedConsultant;
     try {
       const response = await runConfirmedAction<{
         ready: string[];
         notReady: string[];
       }>("send_to_consultant", {
-        caseIds: selectedConsultant,
-        source: "tap",
+        caseIds,
+        source,
       });
       setMessage(
         `Sent ${response.result.ready.length}; ${response.result.notReady.length} not ready.`,
@@ -211,6 +227,219 @@ function Dashboard() {
       );
     }
   }
+  const screenActions: AnyAction[] = [
+    defineAction({
+      id: "next_case",
+      description: "Open the next gross case in the active worklist filter.",
+      args: z.object({}),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: () => "Open next gross case",
+      run: () => {
+        const next = nextGrossCase(shown);
+        if (!next)
+          throw new Error(
+            "There are no cases waiting for grossing in this filter.",
+          );
+        window.location.href = `/cases/${next.id}/gross`;
+      },
+    }),
+    defineAction({
+      id: "set_intake_field",
+      description: "Set a case intake field.",
+      args: z.object({
+        field: z.enum([
+          "name",
+          "start",
+          "end",
+          "caseLabel",
+          "specimenType",
+          "priority",
+        ]),
+        value: z.string(),
+      }),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: ({ field }) => `Set intake ${field}`,
+      run: ({ field, value }) =>
+        setIntakeDraft((current) => ({ ...current, [field]: value })),
+    }),
+    defineAction({
+      id: "create_case",
+      description: "Create a single independent case.",
+      args: z.object({
+        caseLabel: z.string(),
+        specimenType: z.string().optional(),
+        priority: z.enum(["routine", "urgent"]).default("routine"),
+      }),
+      screens: ["worklist"],
+      risk: "confirm",
+      describe: ({ caseLabel }) => `Create ${caseLabel}`,
+      run: async (args, ctx) => {
+        try {
+          if (ctx.confirmed) {
+            await runConfirmedAction("create_case", {
+              ...args,
+              source: ctx.source,
+            });
+            setShowNew(null);
+            await load();
+          } else
+            setIntakePending(
+              await prepareAction("create_case", {
+                ...args,
+                source: ctx.source,
+              }),
+            );
+        } catch (cause) {
+          setMessage(
+            cause instanceof Error ? cause.message : "Could not prepare case",
+          );
+        }
+      },
+    }),
+    defineAction({
+      id: "create_batch",
+      description: "Create independent cases under one batch label.",
+      args: z.object({ name: z.string(), start: z.string(), end: z.string() }),
+      screens: ["worklist"],
+      risk: "confirm",
+      describe: ({ start, end }) => `Create ${start} to ${end}`,
+      run: async (args, ctx) => {
+        try {
+          if (ctx.confirmed) {
+            await runConfirmedAction("create_batch", {
+              ...args,
+              source: ctx.source,
+            });
+            setShowNew(null);
+            await load();
+          } else
+            setIntakePending(
+              await prepareAction("create_batch", {
+                ...args,
+                source: ctx.source,
+              }),
+            );
+        } catch (cause) {
+          setMessage(
+            cause instanceof Error ? cause.message : "Could not prepare batch",
+          );
+        }
+      },
+    }),
+    defineAction({
+      id: "confirm_intake",
+      description: "Confirm the intake read-back.",
+      args: z.object({}),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: () => "Confirm intake",
+      run: confirmIntake,
+    }),
+    defineAction({
+      id: "cancel_intake_pending",
+      description: "Cancel the pending intake read-back and edit it.",
+      args: z.object({}),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: () => "Edit intake",
+      run: async () => {
+        if (intakePending) await cancelAction(intakePending.token);
+        setIntakePending(null);
+      },
+    }),
+    defineAction({
+      id: "set_filter",
+      description: "Filter the worklist.",
+      args: z.object({
+        filter: z.enum(["all", "pending", "incomplete", "batch", "single"]),
+      }),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: ({ filter: value }) => `Show ${value} cases`,
+      run: ({ filter: value }) => setFilter(value),
+    }),
+    defineAction({
+      id: "open_intake",
+      description: "Open single-case or batch intake.",
+      args: z.object({ kind: z.enum(["single", "batch"]) }),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: ({ kind }) => `Open ${kind} intake`,
+      run: ({ kind }) => setShowNew(kind),
+    }),
+    defineAction({
+      id: "close_intake",
+      description: "Close case intake.",
+      args: z.object({}),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: () => "Close intake",
+      run: () => {
+        if (intakePending) void cancelAction(intakePending.token);
+        setIntakePending(null);
+        setShowNew(null);
+      },
+    }),
+    defineAction({
+      id: "open_consultant_send",
+      description: "Open consultant bulk selection.",
+      args: z.object({}),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: () => "Select cases for consultant",
+      run: openConsultant,
+    }),
+    defineAction({
+      id: "close_consultant_send",
+      description: "Close consultant selection.",
+      args: z.object({}),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: () => "Close consultant selection",
+      run: () => setConsultantOpen(false),
+    }),
+    defineAction({
+      id: "select_consultant_case",
+      description: "Select or deselect a case for consultant.",
+      args: z.object({
+        caseId: z.number().int().positive(),
+        selected: z.boolean(),
+      }),
+      screens: ["worklist"],
+      risk: "safe",
+      describe: ({ caseId, selected }) =>
+        `${selected ? "Select" : "Deselect"} case ${caseId}`,
+      run: ({ caseId, selected }) =>
+        setSelectedConsultant((current) =>
+          selected
+            ? Array.from(new Set([...current, caseId]))
+            : current.filter((id) => id !== caseId),
+        ),
+    }),
+    defineAction({
+      id: "send_to_consultant",
+      description: "Send selected ready cases to consultant.",
+      args: z.object({
+        start: z.string().optional(),
+        end: z.string().optional(),
+      }),
+      screens: ["worklist"],
+      risk: "confirm",
+      describe: () =>
+        `Send ${selectedConsultant.length} selected cases to consultant`,
+      run: (args, ctx) => sendConsultant(ctx.source, args),
+    }),
+  ];
+  const actions = useRegisterActions("worklist", screenActions, () => ({
+    screenId: "worklist",
+    filter,
+    visibleCases: shown.map((item) => item.caseLabel),
+    modal: showNew || (consultantOpen ? "consultant_send" : null),
+    selectedConsultant,
+    intakeDraft,
+  }));
   return (
     <main className="app-shell">
       <header>
@@ -221,13 +450,21 @@ function Dashboard() {
           </div>
           <h1>Worklist</h1>
         </div>
-        <button className="icon-button" onClick={() => setShowNew("single")}>
+        <button
+          data-action="open_intake"
+          className="icon-button"
+          onClick={() => void actions.run("open_intake", { kind: "single" })}
+        >
           ＋ Case
         </button>
       </header>
       <div className="quick-links">
-        <Link href="/search">⌕ Search cases</Link>
-        <Link href="/end-day">End of day →</Link>
+        <Link data-action="navigate" href="/search">
+          ⌕ Search cases
+        </Link>
+        <Link data-action="navigate" href="/end-day">
+          End of day →
+        </Link>
       </div>
       <section className="stage-grid">
         {["Gross", "Micro", "Consultant", "Typist", "Confirm"].map((x) => (
@@ -248,20 +485,30 @@ function Dashboard() {
           ].map(([v, t]) => (
             <button
               className={filter === v ? "chip active" : "chip"}
-              onClick={() => setFilter(v)}
+              data-action="set_filter"
+              onClick={() => void actions.run("set_filter", { filter: v })}
               key={v}
             >
               {t}
             </button>
           ))}
         </div>
-        <button className="primary small" onClick={() => setShowNew("batch")}>
+        <button
+          data-action="open_intake"
+          className="primary small"
+          onClick={() => void actions.run("open_intake", { kind: "batch" })}
+        >
           ＋ New batch
         </button>
       </div>
       {nextGrossCase(shown) && (
         <Link
           className="primary next-gross"
+          data-action="next_case"
+          onClick={(event) => {
+            event.preventDefault();
+            void actions.run("next_case");
+          }}
           href={`/cases/${nextGrossCase(shown)!.id}/gross`}
         >
           Start next gross · {nextGrossCase(shown)!.caseLabel}
@@ -270,13 +517,14 @@ function Dashboard() {
       {cases.some((item) => item.status === "micro_done") && (
         <button
           className="secondary wide consultant-button"
-          onClick={openConsultant}
+          data-action="open_consultant_send"
+          onClick={() => void actions.run("open_consultant_send")}
         >
           Send cases to consultant
         </button>
       )}
       {cases.some((item) => item.status === "report_approved") && (
-        <Link className="primary wide" href="/typist">
+        <Link data-action="navigate" className="primary wide" href="/typist">
           Send approved reports to typist
         </Link>
       )}
@@ -323,11 +571,8 @@ function Dashboard() {
             <button
               type="button"
               className="close"
-              onClick={() => {
-                if (intakePending) void cancelAction(intakePending.token);
-                setIntakePending(null);
-                setShowNew(null);
-              }}
+              data-action="close_intake"
+              onClick={() => void actions.run("close_intake")}
             >
               ×
             </button>
@@ -342,17 +587,16 @@ function Dashboard() {
                   <button
                     type="button"
                     className="secondary"
-                    onClick={() => {
-                      void cancelAction(intakePending.token);
-                      setIntakePending(null);
-                    }}
+                    data-action="cancel_intake_pending"
+                    onClick={() => void actions.run("cancel_intake_pending")}
                   >
                     Edit
                   </button>
                   <button
                     type="button"
                     className="primary"
-                    onClick={() => void confirmIntake()}
+                    data-action="confirm"
+                    onClick={() => void actions.run("confirm_intake")}
                   >
                     Confirm and create
                   </button>
@@ -362,16 +606,51 @@ function Dashboard() {
               <>
                 <label>
                   Batch name
-                  <input name="name" placeholder="October 22 grossing" />
+                  <input
+                    data-action="set_intake_field"
+                    name="name"
+                    value={intakeDraft.name}
+                    onChange={(event) =>
+                      void actions.run("set_intake_field", {
+                        field: "name",
+                        value: event.target.value,
+                      })
+                    }
+                    placeholder="October 22 grossing"
+                  />
                 </label>
                 <div className="two">
                   <label>
                     From
-                    <input name="start" required placeholder="S-101" />
+                    <input
+                      data-action="set_intake_field"
+                      name="start"
+                      value={intakeDraft.start}
+                      onChange={(event) =>
+                        void actions.run("set_intake_field", {
+                          field: "start",
+                          value: event.target.value,
+                        })
+                      }
+                      required
+                      placeholder="S-101"
+                    />
                   </label>
                   <label>
                     To
-                    <input name="end" required placeholder="S-140" />
+                    <input
+                      data-action="set_intake_field"
+                      name="end"
+                      value={intakeDraft.end}
+                      onChange={(event) =>
+                        void actions.run("set_intake_field", {
+                          field: "end",
+                          value: event.target.value,
+                        })
+                      }
+                      required
+                      placeholder="S-140"
+                    />
                   </label>
                 </div>
               </>
@@ -379,15 +658,48 @@ function Dashboard() {
               <>
                 <label>
                   Case ID
-                  <input name="caseLabel" required placeholder="S-141" />
+                  <input
+                    data-action="set_intake_field"
+                    name="caseLabel"
+                    value={intakeDraft.caseLabel}
+                    onChange={(event) =>
+                      void actions.run("set_intake_field", {
+                        field: "caseLabel",
+                        value: event.target.value,
+                      })
+                    }
+                    required
+                    placeholder="S-141"
+                  />
                 </label>
                 <label>
                   Specimen
-                  <input name="specimenType" placeholder="Skin ellipse" />
+                  <input
+                    data-action="set_intake_field"
+                    name="specimenType"
+                    value={intakeDraft.specimenType}
+                    onChange={(event) =>
+                      void actions.run("set_intake_field", {
+                        field: "specimenType",
+                        value: event.target.value,
+                      })
+                    }
+                    placeholder="Skin ellipse"
+                  />
                 </label>
                 <label>
                   Priority
-                  <select name="priority" defaultValue="routine">
+                  <select
+                    data-action="set_intake_field"
+                    name="priority"
+                    value={intakeDraft.priority}
+                    onChange={(event) =>
+                      void actions.run("set_intake_field", {
+                        field: "priority",
+                        value: event.target.value,
+                      })
+                    }
+                  >
                     <option value="routine">Routine</option>
                     <option value="urgent">Urgent</option>
                   </select>
@@ -402,7 +714,12 @@ function Dashboard() {
               </p>
             )}
             {!intakePending && (
-              <button className="primary">
+              <button
+                data-action={
+                  showNew === "batch" ? "create_batch" : "create_case"
+                }
+                className="primary"
+              >
                 {showNew === "batch" ? "Create cases" : "Add case"}
               </button>
             )}
@@ -413,7 +730,11 @@ function Dashboard() {
       {consultantOpen && (
         <div className="modal">
           <div className="modal-card">
-            <button className="close" onClick={() => setConsultantOpen(false)}>
+            <button
+              data-action="close_consultant_send"
+              className="close"
+              onClick={() => void actions.run("close_consultant_send")}
+            >
               ×
             </button>
             <div className="eyebrow">BULK SEND</div>
@@ -441,13 +762,13 @@ function Dashboard() {
                 <label key={item.id}>
                   <input
                     type="checkbox"
+                    data-action="select_consultant_case"
                     checked={selectedConsultant.includes(item.id)}
                     onChange={(event) =>
-                      setSelectedConsultant((current) =>
-                        event.target.checked
-                          ? [...current, item.id]
-                          : current.filter((id) => id !== item.id),
-                      )
+                      void actions.run("select_consultant_case", {
+                        caseId: item.id,
+                        selected: event.target.checked,
+                      })
                     }
                   />
                   <span>
@@ -458,8 +779,9 @@ function Dashboard() {
             </div>
             <button
               className="primary"
+              data-action="send_to_consultant"
               disabled={!selectedConsultant.length}
-              onClick={() => void sendConsultant()}
+              onClick={() => void actions.run("send_to_consultant")}
             >
               Confirm bulk send
             </button>
@@ -473,7 +795,7 @@ function Dashboard() {
 }
 function CaseRow({ c }: { c: Case }) {
   return (
-    <Link href={`/cases/${c.id}`} className="case-row">
+    <Link data-action="navigate" href={`/cases/${c.id}`} className="case-row">
       <div>
         <strong>{c.caseLabel}</strong>
         <span>
@@ -494,14 +816,19 @@ function CaseRow({ c }: { c: Case }) {
   );
 }
 export default function Home() {
-  const [ready, setReady] = useState(false);
+  const { authenticated, setAuthenticated } = useAuthState();
+  const [ready, setReady] = useState(authenticated);
   const openSession = useCallback(() => {
+    setAuthenticated(true);
     const today = localDateKey();
     if (localStorage.getItem("histopath_briefing_seen") !== today) {
       window.location.href = "/briefing";
       return;
     }
     setReady(true);
-  }, []);
+  }, [setAuthenticated]);
+  useEffect(() => {
+    if (authenticated) openSession();
+  }, [authenticated, openSession]);
   return ready ? <Dashboard /> : <PinGate onReady={openSession} />;
 }

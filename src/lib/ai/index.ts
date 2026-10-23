@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { aiConfig, HISTOPATHOLOGY_VOCABULARY } from "./config";
+import {
+  ACTION_ROUTER_SYSTEM_PROMPT,
+  buildActionRouterTools,
+  estimateRouterStaticTokens,
+} from "@/lib/action-router";
+import type { RouterAction, RouterActionCall, RouterContext } from "./types";
 
 export class AiBusyError extends Error {
   constructor() {
@@ -33,6 +39,8 @@ const commandResultSchema = z.object({
 export type CommandResult = z.infer<typeof commandResultSchema>;
 export type CommandContext = { screen: string; caseId?: number };
 export type ChatMessage = { role: "user" | "assistant"; content: string };
+
+export type { RouterAction, RouterActionCall, RouterContext } from "./types";
 
 const ROUTER_SYSTEM_PROMPT =
   "Route a histopathology worklist command. Use one provided tool. Never invent missing arguments; ask a short clarifying question instead. Never include patient details.";
@@ -239,6 +247,73 @@ export async function runCommand(
     );
   }
   return CLARIFYING_RESPONSE;
+}
+
+export async function runActionRouter(
+  transcript: string,
+  context: RouterContext,
+): Promise<{ calls: RouterActionCall[]; reply: string }> {
+  const actions = context.actions.slice(0, 24);
+  if (estimateRouterStaticTokens(actions) > 1_000)
+    throw new Error("The current action registry exceeds the router budget.");
+  const tools = buildActionRouterTools(actions);
+  const compactState = JSON.stringify(context.screenState).slice(0, 1_200);
+  const compactTurns = context.lastTurns.slice(-3).join("\n").slice(0, 500);
+  const data = await withRateLimitRetry(
+    () =>
+      fetch(`${aiConfig.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: authorizationHeaders(),
+        body: JSON.stringify({
+          model: aiConfig.modelCommands,
+          messages: [
+            { role: "system", content: ACTION_ROUTER_SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: `screen=${context.screenId}; state=${compactState}; recent=${compactTurns}`,
+            },
+            { role: "user", content: transcript },
+          ],
+          tools,
+          tool_choice: "auto",
+          temperature: 0,
+          max_completion_tokens: 180,
+        }),
+      }),
+    async (response) =>
+      (await response.json()) as {
+        choices?: Array<{
+          message?: {
+            content?: string;
+            tool_calls?: Array<{
+              function?: { name?: string; arguments?: string };
+            }>;
+          };
+        }>;
+      },
+  );
+  const message = data.choices?.[0]?.message;
+  const allowed = new Set(actions.map((action) => action.id));
+  const calls: RouterActionCall[] = [];
+  for (const toolCall of message?.tool_calls || []) {
+    const call = toolCall.function;
+    if (!call?.name || !allowed.has(call.name) || calls.length === 3) continue;
+    try {
+      const args = JSON.parse(call.arguments || "{}") as unknown;
+      if (args && typeof args === "object" && !Array.isArray(args))
+        calls.push({ id: call.name, args: args as Record<string, unknown> });
+    } catch {
+      continue;
+    }
+  }
+  return {
+    calls,
+    reply:
+      message?.content?.trim() ||
+      (calls.length
+        ? `Running ${calls.map((call) => call.id.replaceAll("_", " ")).join(", ")}.`
+        : "I need a little more detail."),
+  };
 }
 
 export async function chat({

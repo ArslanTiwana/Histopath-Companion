@@ -1,11 +1,14 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/app/components/ActionLink";
 import { useCallback, useEffect, useState } from "react";
+import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
+import { useRegisterActions } from "@/app/components/ActionProvider";
+import { defineAction, type AnyAction } from "@/lib/actions";
 
 type Content = Record<string, string>;
 type Data = {
@@ -18,6 +21,7 @@ type Data = {
     status: string;
     version: number;
     readBackVersion: number | null;
+    template: { specimenType: string } | null;
   } | null;
 };
 const labels: Record<string, string> = {
@@ -111,16 +115,83 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   }
   function voiceAction(text: string) {
     const command = text.toLowerCase();
-    if (command.includes("read")) void readBack("voice");
-    else if (command.includes("approve")) void approve("voice");
-    else if (command.includes("edit")) setEditing(true);
+    if (command.includes("read"))
+      void actions.run("read_report", {}, { source: "voice" });
+    else if (command.includes("approve"))
+      void actions.run("approve_report", {}, { source: "voice" });
+    else if (command.includes("edit"))
+      void actions.run(
+        "toggle_report_edit",
+        { editing: true },
+        { source: "voice" },
+      );
     else setError("Say read it back, edit, or approve.");
   }
+  const screenActions: AnyAction[] = [
+    defineAction({
+      id: "set_report_field",
+      description: "Edit one report field.",
+      args: z.object({ field: z.string(), value: z.string() }),
+      screens: ["report"],
+      risk: "safe",
+      describe: ({ field }) => `Edit report ${field}`,
+      run: ({ field, value }) =>
+        setContent((current) => ({ ...current, [field]: value })),
+    }),
+    defineAction({
+      id: "toggle_report_edit",
+      description: "Switch between report edit and preview.",
+      args: z.object({ editing: z.boolean().optional() }),
+      screens: ["report"],
+      risk: "safe",
+      describe: () => "Toggle report editing",
+      run: ({ editing: value }) => setEditing((current) => value ?? !current),
+    }),
+    defineAction({
+      id: "generate_report",
+      description: "Generate the report.",
+      args: z.object({}),
+      screens: ["report"],
+      risk: "confirm",
+      describe: () => "Generate report",
+      run: (_args, ctx) => generate(ctx.source),
+    }),
+    defineAction({
+      id: "read_report",
+      description: "Speak and record read-back for this report version.",
+      args: z.object({}),
+      screens: ["report"],
+      risk: "confirm",
+      describe: () => "Read and save this report version",
+      run: (_args, ctx) => readBack(ctx.source),
+    }),
+    defineAction({
+      id: "approve_report",
+      description: "Approve the current report version.",
+      args: z.object({}),
+      screens: ["report"],
+      risk: "confirm",
+      describe: () => "Approve this report",
+      run: (_args, ctx) => approve(ctx.source),
+    }),
+  ];
+  const actions = useRegisterActions("report", screenActions, () => ({
+    screenId: "report",
+    caseLabel: item?.caseLabel,
+    content,
+    editing,
+    reportVersion: item?.report?.version,
+    readBackVersion: item?.report?.readBackVersion,
+  }));
   if (!item) return <main className="app-shell">Loading…</main>;
   if (!item.report)
     return (
       <main className="app-shell">
-        <Link href={`/cases/${params.id}`} className="back">
+        <Link
+          data-action="navigate"
+          href={`/cases/${params.id}`}
+          className="back"
+        >
           ← Case
         </Link>
         <div className="eyebrow">REPORT</div>
@@ -132,8 +203,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
           </p>
           <button
             className="primary wide"
+            data-action="generate_report"
             disabled={busy}
-            onClick={() => void generate()}
+            onClick={() => void actions.run("generate_report")}
           >
             Confirm and generate report
           </button>
@@ -144,13 +216,17 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     );
   return (
     <main className="app-shell">
-      <Link href={`/cases/${params.id}`} className="back">
+      <Link
+        data-action="navigate"
+        href={`/cases/${params.id}`}
+        className="back"
+      >
         ← Case
       </Link>
       <header>
         <div>
           <div className="eyebrow">
-            Template: {item.specimenType || "standard report"}
+            Template: {item.report.template?.specimenType || "standard report"}
           </div>
           <h1>Report preview · {item.caseLabel}</h1>
         </div>
@@ -163,12 +239,13 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             <b>{labels[key] || key}</b>
             {editing ? (
               <textarea
+                data-action="set_report_field"
                 value={value}
                 onChange={(event) =>
-                  setContent((current) => ({
-                    ...current,
-                    [key]: event.target.value,
-                  }))
+                  void actions.run("set_report_field", {
+                    field: key,
+                    value: event.target.value,
+                  })
                 }
               />
             ) : (
@@ -182,22 +259,25 @@ export default function ReportPage({ params }: { params: { id: string } }) {
       </p>
       <button
         className="secondary wide"
+        data-action="read_report"
         disabled={busy}
-        onClick={() => void readBack("tap")}
+        onClick={() => void actions.run("read_report")}
       >
         🔊 Read it back
       </button>
       <div className="gross-actions">
         <button
           className="secondary"
-          onClick={() => setEditing((value) => !value)}
+          data-action="toggle_report_edit"
+          onClick={() => void actions.run("toggle_report_edit")}
         >
           {editing ? "Preview" : "Edit"}
         </button>
         <button
           className="primary"
+          data-action="approve_report"
           disabled={busy || item.report.status === "approved"}
-          onClick={() => void approve()}
+          onClick={() => void actions.run("approve_report")}
         >
           Approve
         </button>

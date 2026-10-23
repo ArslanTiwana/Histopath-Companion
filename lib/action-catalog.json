@@ -1,0 +1,392 @@
+[
+  {
+    "screen": "global",
+    "id": "navigate",
+    "risk": "safe",
+    "description": "Open an app route"
+  },
+  {
+    "screen": "global",
+    "id": "go_back",
+    "risk": "safe",
+    "description": "Return to the previous screen"
+  },
+  {
+    "screen": "global",
+    "id": "open_case",
+    "risk": "safe",
+    "description": "Open a case by label"
+  },
+  {
+    "screen": "global",
+    "id": "next_case",
+    "risk": "safe",
+    "description": "Open the next gross case"
+  },
+  {
+    "screen": "global",
+    "id": "set_filter",
+    "risk": "safe",
+    "description": "Change the case filter"
+  },
+  {
+    "screen": "global",
+    "id": "read_screen",
+    "risk": "safe",
+    "description": "Read the current screen summary"
+  },
+  {
+    "screen": "global",
+    "id": "stop_listening",
+    "risk": "safe",
+    "description": "Stop hands-free listening"
+  },
+  {
+    "screen": "global",
+    "id": "undo_last",
+    "risk": "safe",
+    "description": "Undo the last safe action"
+  },
+  {
+    "screen": "global",
+    "id": "confirm",
+    "risk": "safe",
+    "description": "Confirm the pending action"
+  },
+  {
+    "screen": "global",
+    "id": "cancel",
+    "risk": "safe",
+    "description": "Cancel the pending action"
+  },
+  {
+    "screen": "worklist",
+    "id": "open_intake",
+    "risk": "safe",
+    "description": "Open single or batch intake"
+  },
+  {
+    "screen": "worklist",
+    "id": "close_intake",
+    "risk": "safe",
+    "description": "Close intake"
+  },
+  {
+    "screen": "worklist",
+    "id": "create_case",
+    "risk": "confirm",
+    "description": "Create one case"
+  },
+  {
+    "screen": "worklist",
+    "id": "create_batch",
+    "risk": "confirm",
+    "description": "Create a batch"
+  },
+  {
+    "screen": "worklist",
+    "id": "open_consultant_send",
+    "risk": "safe",
+    "description": "Open consultant selection"
+  },
+  {
+    "screen": "worklist",
+    "id": "select_consultant_case",
+    "risk": "safe",
+    "description": "Select a consultant case"
+  },
+  {
+    "screen": "worklist",
+    "id": "send_to_consultant",
+    "risk": "confirm",
+    "description": "Send selected cases to consultant"
+  },
+  {
+    "screen": "gross",
+    "id": "set_specimen",
+    "risk": "safe",
+    "description": "Select specimen by slug"
+  },
+  {
+    "screen": "gross",
+    "id": "same_as_previous",
+    "risk": "safe",
+    "description": "Copy the prior matching specimen"
+  },
+  {
+    "screen": "gross",
+    "id": "answer_gross_question",
+    "risk": "safe",
+    "description": "Answer the current gross field"
+  },
+  {
+    "screen": "gross",
+    "id": "next_gross_field",
+    "risk": "safe",
+    "description": "Move to the next gross field"
+  },
+  {
+    "screen": "gross",
+    "id": "previous_gross_field",
+    "risk": "safe",
+    "description": "Move to the previous gross field"
+  },
+  {
+    "screen": "gross",
+    "id": "select_gross_field",
+    "risk": "safe",
+    "description": "Select a gross field"
+  },
+  {
+    "screen": "gross",
+    "id": "edit_gross_answers",
+    "risk": "safe",
+    "description": "Return to gross editing"
+  },
+  {
+    "screen": "gross",
+    "id": "enter_gross_review",
+    "risk": "safe",
+    "description": "Open gross read-back"
+  },
+  {
+    "screen": "gross",
+    "id": "read_aloud",
+    "risk": "safe",
+    "description": "Read current content aloud"
+  },
+  {
+    "screen": "gross",
+    "id": "open_help",
+    "risk": "safe",
+    "description": "Open contextual help"
+  },
+  {
+    "screen": "gross",
+    "id": "save_gross",
+    "risk": "confirm",
+    "description": "Save gross and advance"
+  },
+  {
+    "screen": "gross",
+    "id": "bypass_step",
+    "risk": "confirm",
+    "description": "Skip or force gross"
+  },
+  {
+    "screen": "help",
+    "id": "ask_help",
+    "risk": "safe",
+    "description": "Ask the study-aid assistant"
+  },
+  {
+    "screen": "help",
+    "id": "close_help",
+    "risk": "confirm",
+    "description": "Close help"
+  },
+  {
+    "screen": "help",
+    "id": "add_help_answer",
+    "risk": "confirm",
+    "description": "Add the latest help answer to notes"
+  },
+  {
+    "screen": "micro",
+    "id": "set_micro_findings",
+    "risk": "safe",
+    "description": "Set microscopy findings"
+  },
+  {
+    "screen": "micro",
+    "id": "set_provisional_diagnosis",
+    "risk": "safe",
+    "description": "Set provisional diagnosis"
+  },
+  {
+    "screen": "micro",
+    "id": "generate_suggestions",
+    "risk": "safe",
+    "description": "Generate study suggestions"
+  },
+  {
+    "screen": "micro",
+    "id": "ignore_suggestions",
+    "risk": "safe",
+    "description": "Clear study suggestions"
+  },
+  {
+    "screen": "micro",
+    "id": "enter_micro_review",
+    "risk": "safe",
+    "description": "Open microscopy read-back"
+  },
+  {
+    "screen": "micro",
+    "id": "edit_micro",
+    "risk": "safe",
+    "description": "Return to microscopy editing"
+  },
+  {
+    "screen": "micro",
+    "id": "save_micro",
+    "risk": "confirm",
+    "description": "Save microscopy"
+  },
+  {
+    "screen": "consultant",
+    "id": "set_consultant_field",
+    "risk": "safe",
+    "description": "Edit a consultant field"
+  },
+  {
+    "screen": "consultant",
+    "id": "enter_consultant_review",
+    "risk": "safe",
+    "description": "Open consultant comparison"
+  },
+  {
+    "screen": "consultant",
+    "id": "save_consultant",
+    "risk": "confirm",
+    "description": "Save consultant findings"
+  },
+  {
+    "screen": "consultant",
+    "id": "generate_report",
+    "risk": "confirm",
+    "description": "Generate report"
+  },
+  {
+    "screen": "report",
+    "id": "set_report_field",
+    "risk": "safe",
+    "description": "Edit a report field"
+  },
+  {
+    "screen": "report",
+    "id": "read_report",
+    "risk": "confirm",
+    "description": "Save and read back report"
+  },
+  {
+    "screen": "report",
+    "id": "approve_report",
+    "risk": "confirm",
+    "description": "Approve report"
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "select_typist_case",
+    "risk": "safe",
+    "description": "Select an approved report"
+  },
+  {
+    "screen": "typist_bundle",
+    "id": "send_to_typist",
+    "risk": "confirm",
+    "description": "Send reports to typist"
+  },
+  {
+    "screen": "typist_check",
+    "id": "set_typed_report",
+    "risk": "safe",
+    "description": "Set typist report text"
+  },
+  {
+    "screen": "typist_check",
+    "id": "compare_typist",
+    "risk": "confirm",
+    "description": "Compare typist report"
+  },
+  {
+    "screen": "typist_check",
+    "id": "send_back_typist",
+    "risk": "confirm",
+    "description": "Return corrections to typist"
+  },
+  {
+    "screen": "typist_check",
+    "id": "set_override_reason",
+    "risk": "safe",
+    "description": "Set delivery override reason"
+  },
+  {
+    "screen": "typist_check",
+    "id": "deliver_case",
+    "risk": "confirm",
+    "description": "Deliver and lock case"
+  },
+  {
+    "screen": "delivered",
+    "id": "unlock_case",
+    "risk": "confirm",
+    "description": "Unlock a delivered case"
+  },
+  {
+    "screen": "search",
+    "id": "set_search_query",
+    "risk": "safe",
+    "description": "Set search text"
+  },
+  {
+    "screen": "search",
+    "id": "search",
+    "risk": "safe",
+    "description": "Search cases"
+  },
+  {
+    "screen": "search",
+    "id": "open_search_result",
+    "risk": "safe",
+    "description": "Open a search result"
+  },
+  {
+    "screen": "end_day",
+    "id": "create_reminder",
+    "risk": "confirm",
+    "description": "Create a reminder"
+  },
+  {
+    "screen": "end_day",
+    "id": "complete_reminder",
+    "risk": "confirm",
+    "description": "Complete a reminder"
+  },
+  {
+    "screen": "end_day",
+    "id": "close_day",
+    "risk": "confirm",
+    "description": "Close the day"
+  },
+  {
+    "screen": "settings",
+    "id": "save_settings",
+    "risk": "confirm",
+    "description": "Save settings"
+  },
+  {
+    "screen": "settings",
+    "id": "set_headset_mode",
+    "risk": "safe",
+    "description": "Toggle headset mode"
+  },
+  {
+    "screen": "settings",
+    "id": "export",
+    "risk": "safe",
+    "description": "Export case data"
+  },
+  {
+    "screen": "templates",
+    "id": "edit_template",
+    "risk": "safe",
+    "description": "Edit a template"
+  },
+  {
+    "screen": "templates",
+    "id": "save_template",
+    "risk": "confirm",
+    "description": "Save a template"
+  }
+]

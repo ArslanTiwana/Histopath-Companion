@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionId, isAuthenticated } from "@/lib/auth";
 import {
-  matchFastPath,
+  matchRegistryFastPath,
   normalizeCaseLabel,
   parseRange,
 } from "@/src/lib/voice/parser";
-import { runCommand, AiBusyError } from "@/src/lib/ai";
+import { runActionRouter, runCommand, AiBusyError } from "@/src/lib/ai";
 import { prisma } from "@/lib/db";
 import {
   cancelPendingAction,
@@ -20,11 +20,72 @@ import {
 } from "@/src/lib/privacy";
 const input = z.object({
   transcript: z.string().trim(),
-  context: z.object({
-    screen: z.string(),
-    caseId: z.number().int().optional(),
-  }),
+  context: z.union([
+    z.object({ screen: z.string(), caseId: z.number().int().optional() }),
+    z.object({
+      screenId: z.string().trim().min(1),
+      screenState: z.record(z.string(), z.unknown()),
+      actions: z
+        .array(
+          z.object({
+            id: z.string().trim().min(1).max(80),
+            description: z.string().max(300),
+            risk: z.enum(["safe", "confirm"]),
+            args: z.record(z.string(), z.unknown()),
+          }),
+        )
+        .max(30),
+    }),
+  ]),
+  lastTurns: z.array(z.string().max(500)).max(3).default([]),
 });
+
+function registryFastPath(
+  tool: string,
+  args: Record<string, unknown>,
+): { id: string; args: Record<string, unknown> } | null {
+  if (tool === "open_worklist") return { id: "navigate", args: { to: "/" } };
+  if (tool === "navigate") return { id: "navigate", args };
+  if (tool === "open_case") return { id: "open_case", args };
+  if (tool === "next_case") return { id: "next_case", args: {} };
+  if (tool === "create_case" && typeof args.label === "string")
+    return {
+      id: "create_case",
+      args: {
+        caseLabel: args.label,
+        specimenType: args.specimen,
+        priority: args.priority || "routine",
+      },
+    };
+  if (
+    tool === "create_batch" &&
+    typeof args.start === "string" &&
+    typeof args.end === "string"
+  )
+    return {
+      id: "create_batch",
+      args: {
+        name: args.name || "Voice batch",
+        start: args.start,
+        end: args.end,
+      },
+    };
+  if (
+    tool === "send_to_consultant" &&
+    typeof args.start === "string" &&
+    typeof args.end === "string"
+  )
+    return { id: "send_to_consultant", args };
+  if (tool === "show_pending")
+    return { id: "set_filter", args: { filter: "pending" } };
+  if (tool === "show_incomplete")
+    return { id: "set_filter", args: { filter: "incomplete" } };
+  if (tool === "set_filter") return { id: "set_filter", args };
+  if (tool === "go_back") return { id: "go_back", args: {} };
+  if (["confirm", "cancel", "undo_last"].includes(tool))
+    return { id: tool, args: {} };
+  return null;
+}
 async function execute(
   sessionId: string,
   tool: string,
@@ -253,12 +314,56 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  let command = matchFastPath(parsed.data.transcript);
+  let command = matchRegistryFastPath(parsed.data.transcript);
   try {
+    const dynamicContext =
+      "screenId" in parsed.data.context ? parsed.data.context : null;
+    if (command) {
+      const mapped = registryFastPath(command.tool, command.args);
+      if (mapped)
+        return NextResponse.json({
+          reply: command.reply,
+          calls: [mapped],
+          transcript: parsed.data.transcript,
+        });
+    }
+    if (!command && dynamicContext) {
+      assertNoPatientIdentifiers(dynamicContext.screenState);
+      const routed = await runActionRouter(parsed.data.transcript, {
+        ...dynamicContext,
+        lastTurns: parsed.data.lastTurns,
+      });
+      const available = new Map(
+        dynamicContext.actions.map((action) => [action.id, action]),
+      );
+      const calls: typeof routed.calls = [];
+      for (const call of routed.calls) {
+        const action = available.get(call.id);
+        if (!action) continue;
+        if (action.risk === "confirm") {
+          calls.push(call);
+          return NextResponse.json({
+            reply: "Please confirm the read-back.",
+            needsConfirm: true,
+            calls,
+            transcript: parsed.data.transcript,
+          });
+        }
+        calls.push(call);
+      }
+      return NextResponse.json({
+        reply: routed.reply,
+        calls,
+        needsConfirm: false,
+        transcript: parsed.data.transcript,
+      });
+    }
     if (!command) {
       const routed = await runCommand(
         parsed.data.transcript,
-        parsed.data.context,
+        "screen" in parsed.data.context
+          ? parsed.data.context
+          : { screen: parsed.data.context.screenId },
       );
       if (!("tool" in routed)) return NextResponse.json(routed);
       command = routed;

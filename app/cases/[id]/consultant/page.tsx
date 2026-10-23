@@ -1,11 +1,14 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
+import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
+import { useRegisterActions } from "@/app/components/ActionProvider";
+import { defineAction, type AnyAction } from "@/lib/actions";
 
 type Fields = {
   diagnosis: string;
@@ -83,6 +86,10 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
       grade: text.match(/\bG(?:rade)?\s*[1-4]\b/i)?.[0] || current.grade,
       pT: text.match(/\bpT\s*[0-4][a-d]?\b/i)?.[0] || current.pT,
       pN: text.match(/\bpN\s*[0-3][a-c]?\b/i)?.[0] || current.pN,
+      margins:
+        text.match(
+          /\bmargins?\s*[:=-]?\s*(clear|negative|positive|involved)\b/i,
+        )?.[1] || current.margins,
       laterality:
         text.match(/\b(left|right|bilateral)\b/i)?.[0] || current.laterality,
       tumourSize:
@@ -129,6 +136,96 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
     }
     window.location.href = `/cases/${params.id}/report`;
   }
+  const screenActions: AnyAction[] = [
+    defineAction({
+      id: "set_consultant_field",
+      description: "Set a consultant diagnosis field or learned note.",
+      args: z.object({
+        field: z.enum([
+          "diagnosis",
+          "grade",
+          "pT",
+          "pN",
+          "margins",
+          "laterality",
+          "tumourSize",
+          "learnedNote",
+        ]),
+        value: z.string(),
+      }),
+      screens: ["consultant"],
+      risk: "safe",
+      describe: ({ field, value }) => `Set ${field} to ${value}`,
+      run: ({ field, value }) =>
+        field === "learnedNote"
+          ? setLearnedNote(value)
+          : setFields((current) => ({ ...current, [field]: value })),
+    }),
+    defineAction({
+      id: "dictate_consultant",
+      description: "Parse consultant fields from dictation.",
+      args: z.object({ text: z.string() }),
+      screens: ["consultant"],
+      risk: "safe",
+      describe: () => "Dictate consultant diagnosis",
+      run: ({ text }) => applyDictation(text),
+    }),
+    defineAction({
+      id: "enter_consultant_review",
+      description: "Open and speak the consultant comparison.",
+      args: z.object({}),
+      screens: ["consultant"],
+      risk: "safe",
+      describe: () => "Review consultant diagnosis",
+      run: () => {
+        setReview(true);
+        window.speechSynthesis?.speak(
+          new SpeechSynthesisUtterance(
+            inputs
+              .map(
+                ([key, label]) => `${label}. ${fields[key] || "Not recorded"}`,
+              )
+              .join(". "),
+          ),
+        );
+      },
+    }),
+    defineAction({
+      id: "edit_consultant",
+      description: "Return to consultant editing.",
+      args: z.object({}),
+      screens: ["consultant"],
+      risk: "safe",
+      describe: () => "Edit consultant fields",
+      run: () => setReview(false),
+    }),
+    defineAction({
+      id: "save_consultant",
+      description: "Save consultant diagnosis and comparison.",
+      args: z.object({}),
+      screens: ["consultant"],
+      risk: "confirm",
+      describe: () => "Save consultant diagnosis",
+      run: (_args, ctx) => save(ctx.source),
+    }),
+    defineAction({
+      id: "generate_report",
+      description: "Generate the report from saved consultant findings.",
+      args: z.object({}),
+      screens: ["consultant"],
+      risk: "confirm",
+      describe: () => "Generate report",
+      run: (_args, ctx) => generate(ctx.source),
+    }),
+  ];
+  const actions = useRegisterActions("consultant", screenActions, () => ({
+    screenId: "consultant",
+    caseLabel: item?.caseLabel,
+    fields,
+    learnedNote,
+    mode: review ? "comparison" : "entry",
+    saved,
+  }));
   if (!item) return <main className="app-shell">Loading…</main>;
   const rows: Row[] = comparison.length
     ? comparison
@@ -144,7 +241,11 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
       }));
   return (
     <main className="app-shell">
-      <Link href={`/cases/${params.id}`} className="back">
+      <Link
+        data-action="navigate"
+        href={`/cases/${params.id}`}
+        className="back"
+      >
         ← Case
       </Link>
       <header>
@@ -165,12 +266,13 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
               <label className="field-label" key={key}>
                 {label}
                 <input
+                  data-action="set_consultant_field"
                   value={fields[key]}
                   onChange={(event) =>
-                    setFields((current) => ({
-                      ...current,
-                      [key]: event.target.value,
-                    }))
+                    void actions.run("set_consultant_field", {
+                      field: key,
+                      value: event.target.value,
+                    })
                   }
                 />
               </label>
@@ -178,32 +280,33 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
             <label className="field-label">
               Learned note
               <textarea
+                data-action="set_consultant_field"
                 value={learnedNote}
-                onChange={(event) => setLearnedNote(event.target.value)}
+                onChange={(event) =>
+                  void actions.run("set_consultant_field", {
+                    field: "learnedNote",
+                    value: event.target.value,
+                  })
+                }
                 placeholder="What changed and what will you check next time?"
               />
             </label>
           </section>
           <DictationButton
             label="Dictate consultant diagnosis"
-            onTranscript={applyDictation}
+            onTranscript={(text) =>
+              void actions.run(
+                "dictate_consultant",
+                { text },
+                { source: "voice" },
+              )
+            }
           />
           <button
             className="primary wide"
+            data-action="enter_consultant_review"
             disabled={!fields.diagnosis.trim()}
-            onClick={() => {
-              setReview(true);
-              window.speechSynthesis?.speak(
-                new SpeechSynthesisUtterance(
-                  inputs
-                    .map(
-                      ([key, label]) =>
-                        `${label}. ${fields[key] || "Not recorded"}`,
-                    )
-                    .join(". "),
-                ),
-              );
-            }}
+            onClick={() => void actions.run("enter_consultant_review")}
           >
             Read back and compare
           </button>
@@ -247,13 +350,18 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
           )}
           {!saved ? (
             <div className="gross-actions">
-              <button className="secondary" onClick={() => setReview(false)}>
+              <button
+                data-action="edit_consultant"
+                className="secondary"
+                onClick={() => void actions.run("edit_consultant")}
+              >
                 Edit
               </button>
               <button
                 className="primary"
+                data-action="save_consultant"
                 disabled={busy}
-                onClick={() => void save()}
+                onClick={() => void actions.run("save_consultant")}
               >
                 Confirm and save
               </button>
@@ -262,8 +370,9 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
             <>
               <button
                 className="primary wide"
+                data-action="generate_report"
                 disabled={busy}
-                onClick={() => void generate()}
+                onClick={() => void actions.run("generate_report")}
               >
                 Generate report
               </button>
@@ -271,7 +380,11 @@ export default function ConsultantPage({ params }: { params: { id: string } }) {
                 label="Say generate report"
                 onTranscript={(text) =>
                   /generate report/i.test(text)
-                    ? void generate("voice")
+                    ? void actions.run(
+                        "generate_report",
+                        {},
+                        { source: "voice" },
+                      )
                     : setError("Say generate report to continue.")
                 }
               />

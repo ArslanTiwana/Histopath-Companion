@@ -5,7 +5,9 @@ import {
   digitsLookSwapped,
   normalizeClinicalValue,
   parseDiagnosisText,
+  hasConsultantDifferences,
 } from "@/lib/phase5-actions";
+import { applyReportTemplate } from "@/lib/report-templates";
 
 describe("Phase 5 consultant comparison", () => {
   it("extracts structured staging fields from consultant dictation", () => {
@@ -32,6 +34,50 @@ describe("Phase 5 consultant comparison", () => {
     expect(differences.map((row) => row.field)).toEqual(
       expect.arrayContaining(["pT", "pN"]),
     );
+  });
+
+  it("keeps every difference in Learned From even without a written note", () => {
+    expect(
+      hasConsultantDifferences([
+        {
+          field: "grade",
+          label: "Grade",
+          resident: "G1",
+          consultant: "G2",
+          matches: false,
+        },
+      ]),
+    ).toBe(true);
+  });
+});
+
+describe("Phase 5 report templates", () => {
+  it("selects configured fields and interpolates default report text", () => {
+    const content = applyReportTemplate(
+      {
+        specimen: "Colon",
+        gross: "Segment of colon",
+        microscopy: "Invasive glands",
+        diagnosis: "Adenocarcinoma",
+        grade: "G2",
+        stage: "pT3 pN1",
+        margins: "Clear",
+        laterality: "Right",
+        tumourSize: "3.2 cm",
+      },
+      {
+        id: 4,
+        schema: { fields: ["diagnosis", "stage", "margins"] },
+        defaultText: "Summary: {{diagnosis}}, {stage}.",
+      },
+    );
+
+    expect(content).toEqual({
+      diagnosis: "Adenocarcinoma",
+      stage: "pT3 pN1",
+      margins: "Clear",
+      additionalText: "Summary: Adenocarcinoma, pT3 pN1.",
+    });
   });
 });
 

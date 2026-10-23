@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import { prisma } from "./db";
 import { transitionCase } from "./status";
+import { applyReportTemplate } from "./report-templates";
 
 export const diagnosisFieldsSchema = z.object({
   diagnosis: z.string().trim().min(2),
@@ -110,6 +111,10 @@ export function compareDiagnoses(
   );
 }
 
+export function hasConsultantDifferences(comparison: ComparisonRow[]) {
+  return comparison.some((row) => !row.matches);
+}
+
 export async function saveConsultantEntry(
   caseId: number,
   input: z.infer<typeof saveConsultantSchema>,
@@ -173,7 +178,7 @@ export async function generateReport(caseId: number) {
     if (item.status !== "consultant_dx_added")
       throw new Error("Save the consultant diagnosis first");
     const dx = diagnosisFieldsSchema.parse(item.consultantEntry?.consultantDx);
-    const content: ReportContent = {
+    const source: ReportContent = {
       specimen: item.specimenType || "Not recorded",
       gross: item.grossEntry?.descriptionText || "Not recorded",
       microscopy: item.microEntry?.dictation || "Not recorded",
@@ -184,7 +189,32 @@ export async function generateReport(caseId: number) {
       laterality: dx.laterality || "Not recorded",
       tumourSize: dx.tumourSize || "Not recorded",
     };
-    const report = await tx.report.create({ data: { caseId, content } });
+    const exactTemplate = item.specimenType
+      ? await tx.template.findUnique({
+          where: {
+            kind_specimenType: {
+              kind: "report",
+              specimenType: item.specimenType,
+            },
+          },
+          select: { id: true, schema: true, defaultText: true },
+        })
+      : null;
+    const fallbackTemplate = exactTemplate
+      ? null
+      : await tx.template.findFirst({
+          where: {
+            kind: "report",
+            specimenType: { in: ["Default", "Other"] },
+          },
+          orderBy: { specimenType: "asc" },
+          select: { id: true, schema: true, defaultText: true },
+        });
+    const template = exactTemplate || fallbackTemplate;
+    const content = applyReportTemplate(source, template);
+    const report = await tx.report.create({
+      data: { caseId, content, templateId: template?.id || null },
+    });
     await transitionCase(
       {
         caseId,
@@ -342,21 +372,8 @@ export async function sendApprovedReports(
     orderBy: { caseLabel: "asc" },
   });
   if (!cases.length) throw new Error("No approved reports are ready");
-  await prisma.$transaction(async (tx) => {
-    for (const item of cases) {
-      await transitionCase(
-        {
-          caseId: item.id,
-          from: "report_approved",
-          to: "with_typist",
-          steps: [{ step: "typist", status: "pending" }],
-          event: { type: "sent_to_typist", payload: { confirmed: true } },
-        },
-        tx,
-      );
-    }
-  });
   const children = cases.flatMap((item, index) => {
+    if (!item.report) throw new Error(`${item.caseLabel} has no report`);
     const report = item.report?.content as Record<string, string>;
     return [
       new Paragraph({
@@ -373,6 +390,20 @@ export async function sendApprovedReports(
   const file = await Packer.toBuffer(
     new Document({ sections: [{ properties: {}, children }] }),
   );
+  await prisma.$transaction(async (tx) => {
+    for (const item of cases) {
+      await transitionCase(
+        {
+          caseId: item.id,
+          from: "report_approved",
+          to: "with_typist",
+          steps: [{ step: "typist", status: "pending" }],
+          event: { type: "sent_to_typist", payload: { confirmed: true } },
+        },
+        tx,
+      );
+    }
+  });
   const date = localDate.replaceAll("-", "");
   return {
     count: cases.length,

@@ -16,6 +16,8 @@ Read the spec before starting any task.
 6. AI is a study aid. Never output a final diagnosis as fact.
 7. All AI calls go through ONE module (src/lib/ai) with configurable
    base URL, model, API key. Default provider: Groq.
+8. Every UI interaction must be a registered action used by both tap and voice.
+   New UI without an action and `data-action` attribute is not done.
 
 ## Stack
 

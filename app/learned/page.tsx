@@ -1,10 +1,13 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/app/components/ActionLink";
 import { useEffect, useMemo, useState } from "react";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
+import { useRegisterActions } from "@/app/components/ActionProvider";
+import type { AnyAction } from "@/lib/actions";
+import { normalizeCaseLabel } from "@/src/lib/voice/parser";
 
 type Row = {
   field: string;
@@ -37,6 +40,12 @@ export default function LearnedPage() {
       ? `${top[1]} recorded differences involve ${top[0].toLowerCase()}.`
       : "No difference pattern yet.";
   }, [entries]);
+  const actions = useRegisterActions("learned", [] as AnyAction[], () => ({
+    screenId: "learned",
+    cases: entries.map((entry) => entry.case.caseLabel),
+    pattern,
+    modal: null,
+  }));
   return (
     <main className="app-shell">
       <div className="eyebrow">MY DIFFERENCE LOG</div>
@@ -46,6 +55,7 @@ export default function LearnedPage() {
           const first = entry.comparison.find((row) => !row.matches);
           return (
             <Link
+              data-action="open_case"
               href={`/cases/${entry.case.id}`}
               className="learned-row"
               key={entry.id}
@@ -59,7 +69,7 @@ export default function LearnedPage() {
                   {first
                     ? `${first.resident} vs ${first.consultant}`
                     : "Review saved"}{" "}
-                  · {entry.learnedNote}
+                  · {entry.learnedNote || "No note added"}
                 </span>
               </div>
               <b>{first?.label || "Review"}</b>
@@ -77,12 +87,9 @@ export default function LearnedPage() {
       <DictationButton
         label="Say open S-131"
         onTranscript={(text) => {
-          const spoken = text.match(/\bS[\s-]?(\d+)\b/i);
-          const label = spoken ? `S-${spoken[1]}` : "";
-          const match = entries.find(
-            (entry) => entry.case.caseLabel.toUpperCase() === label,
-          );
-          if (match) window.location.href = `/cases/${match.case.id}`;
+          const label = normalizeCaseLabel(text.replace(/^open\s+/i, ""));
+          if (label)
+            void actions.run("open_case", { label }, { source: "voice" });
         }}
       />
       <AppNav active="learn" />

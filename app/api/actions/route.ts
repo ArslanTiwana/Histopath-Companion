@@ -5,6 +5,7 @@ import {
   cancelPendingAction,
   confirmPendingAction,
   prepareConfirmedAction,
+  prepareClientAction,
   undoLastAction,
 } from "@/lib/confirmed-actions";
 
@@ -19,6 +20,12 @@ const requestSchema = z.discriminatedUnion("mode", [
     token: z.uuid().optional(),
   }),
   z.object({ mode: z.literal("undo") }),
+  z.object({
+    mode: z.literal("prepare_client"),
+    action: z.string().trim().min(1).max(80),
+    args: z.record(z.string(), z.unknown()),
+    readBackText: z.string().trim().min(1).max(2000),
+  }),
 ]);
 
 export async function POST(request: Request) {
@@ -40,6 +47,15 @@ export async function POST(request: Request) {
           sessionId,
           parsed.data.action,
           parsed.data.args,
+        ),
+      );
+    if (parsed.data.mode === "prepare_client")
+      return NextResponse.json(
+        await prepareClientAction(
+          sessionId,
+          parsed.data.action,
+          parsed.data.args,
+          parsed.data.readBackText,
         ),
       );
     if (parsed.data.mode === "confirm")

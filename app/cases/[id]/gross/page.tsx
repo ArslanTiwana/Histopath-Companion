@@ -1,6 +1,7 @@
 "use client";
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "@/app/components/ActionLink";
+import { useEffect, useMemo, useState } from "react";
+import { z } from "zod";
 import {
   GROSS_TEMPLATES,
   SPECIMEN_TYPES,
@@ -9,6 +10,9 @@ import {
 import HelpPanel from "@/app/components/HelpPanel";
 import AppNav from "@/app/components/AppNav";
 import BypassStepModal from "@/app/components/BypassStepModal";
+import DictationButton from "@/app/components/DictationButton";
+import { useRegisterActions } from "@/app/components/ActionProvider";
+import { defineAction, type AnyAction } from "@/lib/actions";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
 import {
@@ -40,8 +44,6 @@ export default function GrossPage({ params }: { params: { id: string } }) {
   const [managedTemplates, setManagedTemplates] = useState<
     Record<string, GrossTemplate>
   >({});
-  const recorder = useRef<MediaRecorder | null>(null);
-  const chunks = useRef<Blob[]>([]);
   useEffect(() => {
     apiFetch<GrossData>(`/api/cases/${params.id}/gross`).then(
       (value: GrossData) => {
@@ -151,50 +153,6 @@ export default function GrossPage({ params }: { params: { id: string } }) {
     }
     answer(spoken);
   }
-  async function startVoice() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const media = new MediaRecorder(stream);
-      recorder.current = media;
-      chunks.current = [];
-      media.ondataavailable = (event) => {
-        if (event.data.size) chunks.current.push(event.data);
-      };
-      media.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        setBusy(true);
-        try {
-          const form = new FormData();
-          form.append(
-            "audio",
-            new Blob(chunks.current, { type: media.mimeType || "audio/webm" }),
-          );
-          const result = await apiFetch<{
-            transcript?: string;
-            error?: string;
-          }>("/api/voice/transcribe", {
-            method: "POST",
-            body: form,
-          });
-          if (result.transcript) handleVoice(result.transcript);
-          else setError(result.error || "I didn't catch that.");
-        } catch {
-          setError("Network error while transcribing.");
-        } finally {
-          setBusy(false);
-        }
-      };
-      media.start();
-      setBusy(true);
-    } catch {
-      setError(
-        "Microphone permission is required. You can type the answer instead.",
-      );
-    }
-  }
-  function stopVoice() {
-    recorder.current?.stop();
-  }
   function copyPrevious() {
     const previous = data
       ? previousGrossForSpecimen(data.previous, specimen)
@@ -249,11 +207,188 @@ export default function GrossPage({ params }: { params: { id: string } }) {
     }
     window.location.href = `/cases/${params.id}`;
   }
+  const screenActions: AnyAction[] = [
+    defineAction({
+      id: "set_specimen",
+      description: "Select a specimen template by slug or name.",
+      args: z.object({ specimen: z.string() }),
+      screens: ["gross"],
+      risk: "safe",
+      describe: ({ specimen: value }) => `Use ${value}`,
+      run: ({ specimen: value }) => {
+        const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const match = specimenTypes.find(
+          (type) => type.toLowerCase().replace(/[^a-z0-9]+/g, "-") === slug,
+        );
+        if (!match) throw new Error("That specimen template is not available.");
+        setSpecimen(match);
+      },
+    }),
+    defineAction({
+      id: "same_as_previous",
+      description: "Copy the latest gross from the same specimen type.",
+      args: z.object({}),
+      screens: ["gross"],
+      risk: "safe",
+      describe: () => "Use the previous matching gross",
+      run: copyPrevious,
+    }),
+    defineAction({
+      id: "answer_gross_question",
+      description: "Answer the current gross checklist question.",
+      args: z.object({
+        value: z.string(),
+        advance: z.boolean().default(false),
+      }),
+      screens: ["gross"],
+      risk: "safe",
+      describe: ({ value }) => `Answer ${value}`,
+      run: ({ value, advance }) =>
+        advance
+          ? answer(value)
+          : setFields((current) => ({
+              ...current,
+              [template!.fields[index].key]: value,
+            })),
+    }),
+    defineAction({
+      id: "next_gross_field",
+      description: "Move to the next gross field or review.",
+      args: z.object({}),
+      screens: ["gross"],
+      risk: "safe",
+      describe: () => "Next gross field",
+      run: () =>
+        index < (template?.fields.length || 1) - 1
+          ? setIndex(index + 1)
+          : setMode("review"),
+    }),
+    defineAction({
+      id: "previous_gross_field",
+      description: "Move to the previous gross field.",
+      args: z.object({}),
+      screens: ["gross"],
+      risk: "safe",
+      describe: () => "Previous gross field",
+      run: () => setIndex(Math.max(0, index - 1)),
+    }),
+    defineAction({
+      id: "select_gross_field",
+      description: "Select a gross checklist field by position.",
+      args: z.object({ position: z.number().int().min(1) }),
+      screens: ["gross"],
+      risk: "safe",
+      describe: ({ position }) => `Open gross field ${position}`,
+      run: ({ position }) =>
+        setIndex(Math.min((template?.fields.length || 1) - 1, position - 1)),
+    }),
+    defineAction({
+      id: "edit_gross_answers",
+      description: "Return to gross answers.",
+      args: z.object({}),
+      screens: ["gross"],
+      risk: "safe",
+      describe: () => "Edit gross answers",
+      run: () => setMode("guide"),
+    }),
+    defineAction({
+      id: "enter_gross_review",
+      description: "Open and speak the gross read-back.",
+      args: z.object({}),
+      screens: ["gross"],
+      risk: "safe",
+      describe: () => "Review gross",
+      run: () => {
+        setMode("review");
+        window.speechSynthesis?.speak(
+          new SpeechSynthesisUtterance(description),
+        );
+      },
+    }),
+    defineAction({
+      id: "read_aloud",
+      description: "Read the gross description aloud.",
+      args: z.object({}),
+      screens: ["gross"],
+      risk: "safe",
+      describe: () => "Read gross aloud",
+      run: () =>
+        window.speechSynthesis?.speak(
+          new SpeechSynthesisUtterance(description),
+        ),
+    }),
+    defineAction({
+      id: "open_help",
+      description: "Open gross study help.",
+      args: z.object({}),
+      screens: ["gross"],
+      risk: "safe",
+      describe: () => "Open gross help",
+      run: () => setHelpOpen(true),
+    }),
+    defineAction({
+      id: "save_gross",
+      description: "Save gross and advance to microscopy.",
+      args: z.object({}),
+      screens: ["gross"],
+      risk: "confirm",
+      describe: () => `Save gross: ${description}`,
+      run: (_args, ctx) => submitSave(ctx.source),
+    }),
+    defineAction({
+      id: "set_bypass_mode",
+      description: "Open or close gross bypass.",
+      args: z.object({ mode: z.enum(["skip", "force"]).nullable() }),
+      screens: ["gross"],
+      risk: "safe",
+      describe: ({ mode: value }) =>
+        value ? `${value} gross` : "Close bypass",
+      run: ({ mode: value }) => {
+        setBypass(value);
+        if (!value) setReason("");
+      },
+    }),
+    defineAction({
+      id: "set_bypass_reason",
+      description: "Set the gross bypass reason.",
+      args: z.object({ reason: z.string() }),
+      screens: ["gross"],
+      risk: "safe",
+      describe: () => "Set bypass reason",
+      run: ({ reason: value }) => setReason(value),
+    }),
+    defineAction({
+      id: "bypass_step",
+      description: "Skip or force gross with a logged reason.",
+      args: z.object({}),
+      screens: ["gross"],
+      risk: "confirm",
+      describe: () => `${bypass} gross because ${reason}`,
+      run: (_args, ctx) => submitBypass(ctx.source),
+    }),
+  ];
+  const actions = useRegisterActions("gross", screenActions, () => ({
+    screenId: "gross",
+    caseLabel: data?.case.caseLabel,
+    specimen,
+    currentQuestion: template?.fields[index]?.question,
+    fields,
+    mode,
+    modal: helpOpen ? "help" : bypass ? `bypass_${bypass}` : null,
+  }));
   if (!data) return <main className="app-shell">Loading…</main>;
   if (data.case.status !== "gross_pending")
     return (
       <main className="app-shell">
-        <Link href={`/cases/${params.id}`} className="back">
+        <Link
+          data-action="navigate"
+          onClick={(event) => {
+            event.preventDefault();
+            void actions.run("navigate", { to: `/cases/${params.id}` });
+          }}
+          href={`/cases/${params.id}`}
+          className="back"
+        >
           ← Case
         </Link>
         <div className="detail-card">
@@ -266,7 +401,15 @@ export default function GrossPage({ params }: { params: { id: string } }) {
   if (!specimen)
     return (
       <main className="app-shell">
-        <Link href={`/cases/${params.id}`} className="back">
+        <Link
+          data-action="navigate"
+          onClick={(event) => {
+            event.preventDefault();
+            void actions.run("navigate", { to: `/cases/${params.id}` });
+          }}
+          href={`/cases/${params.id}`}
+          className="back"
+        >
           ← Case
         </Link>
         <div className="eyebrow">{data.case.caseLabel} · FROM WORKLIST</div>
@@ -276,18 +419,25 @@ export default function GrossPage({ params }: { params: { id: string } }) {
           The matching checklist will load. This is saved only after your final
           confirmation.
         </p>
-        <button
-          className="voice-answer wide"
-          onClick={() => (busy ? stopVoice() : void startVoice())}
-        >
-          {busy ? "■ Stop" : "🎙 Say specimen type"}
-        </button>
+        <DictationButton
+          label="Say specimen type"
+          onTranscript={(value) =>
+            void actions.run(
+              "set_specimen",
+              { specimen: value },
+              { source: "voice" },
+            )
+          }
+        />
         <div className="specimen-grid">
           {specimenTypes.map((type) => (
             <button
               className="specimen-card"
+              data-action="set_specimen"
               key={type}
-              onClick={() => setSpecimen(type)}
+              onClick={() =>
+                void actions.run("set_specimen", { specimen: type })
+              }
             >
               {type}
             </button>
@@ -298,7 +448,15 @@ export default function GrossPage({ params }: { params: { id: string } }) {
     );
   return (
     <main className="app-shell gross-shell">
-      <Link href={`/cases/${params.id}`} className="back">
+      <Link
+        data-action="navigate"
+        onClick={(event) => {
+          event.preventDefault();
+          void actions.run("navigate", { to: `/cases/${params.id}` });
+        }}
+        href={`/cases/${params.id}`}
+        className="back"
+      >
         ← {data.case.caseLabel}
       </Link>
       <header>
@@ -320,7 +478,11 @@ export default function GrossPage({ params }: { params: { id: string } }) {
           <b>Added from help:</b> {notes}
         </div>
       )}
-      <button className="help-button" onClick={() => setHelpOpen(true)}>
+      <button
+        data-action="open_help"
+        className="help-button"
+        onClick={() => void actions.run("open_help")}
+      >
         ✦ Ask for help
       </button>
       {mode === "guide" ? (
@@ -337,30 +499,31 @@ export default function GrossPage({ params }: { params: { id: string } }) {
             <label>
               {template!.fields[index].label}
               <input
+                data-action="answer_gross_question"
                 value={fields[template!.fields[index].key] || ""}
                 placeholder={template!.fields[index].placeholder}
                 onChange={(event) =>
-                  setFields((current) => ({
-                    ...current,
-                    [template!.fields[index].key]: event.target.value,
-                  }))
+                  void actions.run("answer_gross_question", {
+                    value: event.target.value,
+                  })
                 }
               />
             </label>
             <div className="gross-actions">
-              <button
-                className="voice-answer"
-                onClick={() => (busy ? stopVoice() : void startVoice())}
-              >
-                {busy ? "■ Stop" : "🎙 Answer by voice"}
-              </button>
+              <DictationButton
+                label="Answer by voice"
+                onTranscript={(value) =>
+                  void actions.run(
+                    "answer_gross_question",
+                    { value, advance: true },
+                    { source: "voice" },
+                  )
+                }
+              />
               <button
                 className="primary"
-                onClick={() =>
-                  index < template!.fields.length - 1
-                    ? setIndex(index + 1)
-                    : setMode("review")
-                }
+                data-action="next_gross_field"
+                onClick={() => void actions.run("next_gross_field")}
               >
                 {index < template!.fields.length - 1 ? "Next" : "Review"}
               </button>
@@ -370,10 +533,15 @@ export default function GrossPage({ params }: { params: { id: string } }) {
             {template!.fields.map((field, fieldIndex) => (
               <button
                 key={field.key}
+                data-action="select_gross_field"
                 className={
                   fieldIndex === index ? "check-item current" : "check-item"
                 }
-                onClick={() => setIndex(fieldIndex)}
+                onClick={() =>
+                  void actions.run("select_gross_field", {
+                    position: fieldIndex + 1,
+                  })
+                }
               >
                 <span>{fields[field.key] ? "✓" : "○"}</span>
                 <div>
@@ -385,12 +553,8 @@ export default function GrossPage({ params }: { params: { id: string } }) {
           </div>
           <button
             className="secondary wide"
-            onClick={() => {
-              setMode("review");
-              window.speechSynthesis?.speak(
-                new SpeechSynthesisUtterance(description),
-              );
-            }}
+            data-action="enter_gross_review"
+            onClick={() => void actions.run("enter_gross_review")}
           >
             Read back and save
           </button>
@@ -400,22 +564,24 @@ export default function GrossPage({ params }: { params: { id: string } }) {
           <p>{description}</p>
           <button
             className="secondary wide"
-            onClick={() =>
-              window.speechSynthesis?.speak(
-                new SpeechSynthesisUtterance(description),
-              )
-            }
+            data-action="read_aloud"
+            onClick={() => void actions.run("read_aloud")}
           >
             🔊 Read aloud
           </button>
           <div className="gross-actions">
-            <button className="secondary" onClick={() => setMode("guide")}>
+            <button
+              data-action="edit_gross_answers"
+              className="secondary"
+              onClick={() => void actions.run("edit_gross_answers")}
+            >
               Edit answers
             </button>
             <button
               className="primary"
+              data-action="save_gross"
               disabled={busy || completed < template!.fields.length}
-              onClick={() => void submitSave("tap")}
+              onClick={() => void actions.run("save_gross")}
             >
               Confirm and save
             </button>
@@ -423,7 +589,11 @@ export default function GrossPage({ params }: { params: { id: string } }) {
         </div>
       )}
       {previousGrossForSpecimen(data.previous, specimen) && (
-        <button className="secondary wide" onClick={copyPrevious}>
+        <button
+          data-action="same_as_previous"
+          className="secondary wide"
+          onClick={() => void actions.run("same_as_previous")}
+        >
           Same as{" "}
           {previousGrossForSpecimen(data.previous, specimen)!.case.caseLabel}
         </button>
@@ -437,12 +607,10 @@ export default function GrossPage({ params }: { params: { id: string } }) {
         onReasonChange={setReason}
         onConfirm={() => void submitBypass("tap")}
         voiceControl={
-          <button
-            className="voice-answer"
-            onClick={() => (busy ? stopVoice() : void startVoice())}
-          >
-            {busy ? "■ Stop" : "🎙 Say confirm or cancel"}
-          </button>
+          <DictationButton
+            label="Say confirm or cancel"
+            onTranscript={handleVoice}
+          />
         }
       />
       {error && <div className="error">{error}</div>}

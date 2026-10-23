@@ -170,3 +170,24 @@ export function matchFastPath(transcript: string): FastPath {
     };
   return null;
 }
+
+export function matchRegistryFastPath(transcript: string): FastPath {
+  const matched = matchFastPath(transcript);
+  if (!matched) return null;
+  const mapped: Record<
+    string,
+    { tool: string; args?: Record<string, unknown> }
+  > = {
+    open_worklist: { tool: "navigate", args: { to: "/" } },
+    show_pending: { tool: "set_filter", args: { filter: "pending" } },
+    show_incomplete: { tool: "set_filter", args: { filter: "incomplete" } },
+  };
+  const replacement = mapped[matched.tool];
+  return replacement
+    ? {
+        ...matched,
+        tool: replacement.tool,
+        args: replacement.args || matched.args,
+      }
+    : matched;
+}

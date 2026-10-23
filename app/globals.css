@@ -1163,6 +1163,93 @@ textarea:focus {
   font-weight: 700;
 }
 
+.floating-voice {
+  position: fixed;
+  right: max(16px, calc((100vw - 600px) / 2 + 16px));
+  bottom: calc(69px + env(safe-area-inset-bottom));
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+.floating-mic,
+.floating-voice-panel {
+  pointer-events: auto;
+}
+.floating-mic {
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--pink);
+  color: #fff;
+  box-shadow: 0 5px 18px rgb(27 26 51 / 28%);
+  font-size: 21px;
+}
+.floating-mic.listening,
+.floating-mic.hearing {
+  box-shadow:
+    0 0 0 6px rgb(214 69 122 / 22%),
+    0 5px 18px rgb(27 26 51 / 28%);
+}
+.floating-mic.error {
+  background: #9f2d2d;
+}
+.floating-voice-panel {
+  width: min(310px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 8px 24px rgb(27 26 51 / 16%);
+  font-size: 12px;
+}
+.voice-panel-toggle {
+  float: right;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+.floating-voice-state {
+  color: var(--primary);
+  font-weight: 800;
+  text-transform: capitalize;
+}
+.floating-transcripts {
+  clear: both;
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  color: var(--ink);
+}
+.floating-voice-notice {
+  clear: both;
+  margin-top: 6px;
+  color: #8b2929;
+}
+.setting-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.setting-toggle span {
+  display: grid;
+  gap: 3px;
+}
+.setting-toggle small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.setting-toggle input {
+  width: 24px;
+  min-height: 24px;
+}
+
 @media (min-width: 601px) {
   .app-shell,
   .pin-shell {

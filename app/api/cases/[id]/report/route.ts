@@ -14,7 +14,10 @@ export async function GET(
     return NextResponse.json({ error: "Invalid case ID" }, { status: 400 });
   const item = await prisma.case.findUnique({
     where: { id },
-    include: { report: true, consultantEntry: true },
+    include: {
+      report: { include: { template: true } },
+      consultantEntry: true,
+    },
   });
   return item
     ? NextResponse.json(item)

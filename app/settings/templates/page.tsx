@@ -1,9 +1,12 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
+import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
 import { apiFetch } from "@/lib/api-fetch";
+import { useRegisterActions } from "@/app/components/ActionProvider";
+import { defineAction, type AnyAction } from "@/lib/actions";
 
 type Template = {
   id: number;
@@ -65,16 +68,82 @@ export default function TemplatesPage() {
       );
     }
   }
+  const screenActions: AnyAction[] = [
+    defineAction({
+      id: "edit_template",
+      description: "Load a template into the editor.",
+      args: z.object({ id: z.number().int().positive() }),
+      screens: ["templates"],
+      risk: "safe",
+      describe: ({ id }) => `Edit template ${id}`,
+      run: ({ id }) => {
+        const item = templates.find((value) => value.id === id);
+        if (!item) throw new Error("Template not found.");
+        edit(item);
+      },
+    }),
+    defineAction({
+      id: "set_template_field",
+      description: "Set one template editor field.",
+      args: z.object({
+        field: z.enum(["kind", "specimenType", "schemaText", "defaultText"]),
+        value: z.string(),
+      }),
+      screens: ["templates"],
+      risk: "safe",
+      describe: ({ field }) => `Edit template ${field}`,
+      run: ({ field, value }) =>
+        setForm((current) => ({ ...current, [field]: value })),
+    }),
+    defineAction({
+      id: "review_template",
+      description: "Review the template before saving.",
+      args: z.object({}),
+      screens: ["templates"],
+      risk: "safe",
+      describe: () => "Review template",
+      run: () => setReview(true),
+    }),
+    defineAction({
+      id: "edit_template_form",
+      description: "Return to template editing.",
+      args: z.object({}),
+      screens: ["templates"],
+      risk: "safe",
+      describe: () => "Edit template",
+      run: () => setReview(false),
+    }),
+    defineAction({
+      id: "save_template",
+      description: "Save this template.",
+      args: z.object({}),
+      screens: ["templates"],
+      risk: "confirm",
+      describe: () => `Save ${form.kind} template for ${form.specimenType}`,
+      run: save,
+    }),
+  ];
+  const actions = useRegisterActions("templates", screenActions, () => ({
+    screenId: "templates",
+    template: form,
+    mode: review ? "review" : "edit",
+    modal: null,
+  }));
   return (
     <main className="app-shell">
-      <Link href="/settings" className="back">
+      <Link data-action="navigate" href="/settings" className="back">
         ← Settings
       </Link>
       <div className="eyebrow">GROSS &amp; REPORT</div>
       <h1>Template manager</h1>
       <div className="template-list">
         {templates.map((item) => (
-          <button className="case-row" key={item.id} onClick={() => edit(item)}>
+          <button
+            data-action="edit_template"
+            className="case-row"
+            key={item.id}
+            onClick={() => void actions.run("edit_template", { id: item.id })}
+          >
             <div>
               <strong>{item.specimenType}</strong>
               <span>{item.kind} template</span>
@@ -86,36 +155,52 @@ export default function TemplatesPage() {
       <section className="detail-card form-stack">
         <h3>{form.id ? "Edit template" : "New template"}</h3>
         <select
+          data-action="set_template_field"
           value={form.kind}
           onChange={(event) =>
-            setForm({ ...form, kind: event.target.value as "gross" | "report" })
+            void actions.run("set_template_field", {
+              field: "kind",
+              value: event.target.value,
+            })
           }
         >
           <option value="gross">Gross</option>
           <option value="report">Report</option>
         </select>
         <input
+          data-action="set_template_field"
           value={form.specimenType}
           onChange={(event) =>
-            setForm({ ...form, specimenType: event.target.value })
+            void actions.run("set_template_field", {
+              field: "specimenType",
+              value: event.target.value,
+            })
           }
           placeholder="Specimen type"
         />
         <label className="field-label">
           Schema JSON
           <textarea
+            data-action="set_template_field"
             value={form.schemaText}
             onChange={(event) =>
-              setForm({ ...form, schemaText: event.target.value })
+              void actions.run("set_template_field", {
+                field: "schemaText",
+                value: event.target.value,
+              })
             }
           />
         </label>
         <label className="field-label">
           Default text
           <textarea
+            data-action="set_template_field"
             value={form.defaultText}
             onChange={(event) =>
-              setForm({ ...form, defaultText: event.target.value })
+              void actions.run("set_template_field", {
+                field: "defaultText",
+                value: event.target.value,
+              })
             }
           />
         </label>
@@ -125,10 +210,18 @@ export default function TemplatesPage() {
               Save the {form.kind} template for {form.specimenType}?
             </p>
             <div className="gross-actions">
-              <button className="secondary" onClick={() => setReview(false)}>
+              <button
+                data-action="edit_template_form"
+                className="secondary"
+                onClick={() => void actions.run("edit_template_form")}
+              >
                 Edit
               </button>
-              <button className="primary" onClick={() => void save()}>
+              <button
+                data-action="save_template"
+                className="primary"
+                onClick={() => void actions.run("save_template")}
+              >
                 Confirm and save
               </button>
             </div>
@@ -136,8 +229,9 @@ export default function TemplatesPage() {
         ) : (
           <button
             className="primary"
+            data-action="review_template"
             disabled={!form.specimenType.trim()}
-            onClick={() => setReview(true)}
+            onClick={() => void actions.run("review_template")}
           >
             Review template
           </button>

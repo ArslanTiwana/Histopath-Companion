@@ -1,12 +1,15 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/app/components/ActionLink";
 import { useEffect, useState } from "react";
+import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
 import { compactLocalDate, localDateKey } from "@/lib/local-date";
+import { useRegisterActions } from "@/app/components/ActionProvider";
+import { defineAction, type AnyAction } from "@/lib/actions";
 
 type Item = { id: number; caseLabel: string };
 type Bundle = {
@@ -25,7 +28,14 @@ export default function TypistSendPage() {
   useEffect(() => {
     apiFetch<Item[]>("/api/typist/send").then((data: Item[]) => {
       setItems(data);
-      setSelected(data.map((item) => item.id));
+      const requestedId = Number(
+        new URLSearchParams(window.location.search).get("caseId"),
+      );
+      setSelected(
+        requestedId && data.some((item) => item.id === requestedId)
+          ? [requestedId]
+          : data.map((item) => item.id),
+      );
     });
   }, []);
   async function send(source: "tap" | "voice" = "tap") {
@@ -68,9 +78,89 @@ export default function TypistSendPage() {
       await navigator.share({ title: file.name, files: [file] });
     else download();
   }
+  const screenActions: AnyAction[] = [
+    defineAction({
+      id: "select_typist_case",
+      description: "Select or deselect an approved report.",
+      args: z.object({
+        caseId: z.number().int().positive(),
+        selected: z.boolean(),
+      }),
+      screens: ["typist_bundle"],
+      risk: "safe",
+      describe: ({ caseId, selected: value }) =>
+        `${value ? "Select" : "Deselect"} ${caseId}`,
+      run: ({ caseId, selected: value }) =>
+        setSelected((current) =>
+          value
+            ? Array.from(new Set([...current, caseId]))
+            : current.filter((id) => id !== caseId),
+        ),
+    }),
+    defineAction({
+      id: "review_typist_send",
+      description: "Review the selected typist bundle.",
+      args: z.object({}),
+      screens: ["typist_bundle"],
+      risk: "safe",
+      describe: () => "Review typist send",
+      run: () => setReview(true),
+    }),
+    defineAction({
+      id: "cancel_typist_send",
+      description: "Return to typist selection.",
+      args: z.object({}),
+      screens: ["typist_bundle"],
+      risk: "safe",
+      describe: () => "Cancel typist send",
+      run: () => setReview(false),
+    }),
+    defineAction({
+      id: "send_to_typist",
+      description: "Send selected reports and prepare the typist file.",
+      args: z.object({}),
+      screens: ["typist_bundle"],
+      risk: "confirm",
+      describe: () => `Send ${selected.length} reports to typist`,
+      run: (_args, ctx) => send(ctx.source),
+    }),
+    defineAction({
+      id: "download_typist_file",
+      description: "Download the prepared typist file.",
+      args: z.object({}),
+      screens: ["typist_bundle"],
+      risk: "safe",
+      describe: () => "Download typist file",
+      run: download,
+    }),
+    defineAction({
+      id: "share_typist_file",
+      description: "Share the prepared typist file.",
+      args: z.object({}),
+      screens: ["typist_bundle"],
+      risk: "safe",
+      describe: () => "Share typist file",
+      run: share,
+    }),
+    defineAction({
+      id: "print_typist_file",
+      description: "Print the prepared typist file.",
+      args: z.object({}),
+      screens: ["typist_bundle"],
+      risk: "safe",
+      describe: () => "Print typist file",
+      run: () => window.print(),
+    }),
+  ];
+  const actions = useRegisterActions("typist_bundle", screenActions, () => ({
+    screenId: "typist_bundle",
+    selectedCaseIds: selected,
+    review,
+    bundle: bundle?.filename || null,
+  }));
   return (
     <main className="app-shell">
-      <Link href="/" className="back">
+      <Link data-action="navigate" href="/" className="back">
         ← Worklist
       </Link>
       <div className="eyebrow">APPROVED REPORTS</div>
@@ -97,13 +187,13 @@ export default function TypistSendPage() {
               <label key={item.id}>
                 <input
                   type="checkbox"
+                  data-action="select_typist_case"
                   checked={selected.includes(item.id)}
                   onChange={(event) =>
-                    setSelected((current) =>
-                      event.target.checked
-                        ? [...current, item.id]
-                        : current.filter((id) => id !== item.id),
-                    )
+                    void actions.run("select_typist_case", {
+                      caseId: item.id,
+                      selected: event.target.checked,
+                    })
                   }
                 />
                 {item.caseLabel}
@@ -112,8 +202,9 @@ export default function TypistSendPage() {
           </div>
           <button
             className="primary wide"
+            data-action="review_typist_send"
             disabled={!selected.length}
-            onClick={() => setReview(true)}
+            onClick={() => void actions.run("review_typist_send")}
           >
             Review send
           </button>
@@ -127,10 +218,18 @@ export default function TypistSendPage() {
             prepared.
           </p>
           <div className="gross-actions">
-            <button className="secondary" onClick={() => setReview(false)}>
+            <button
+              data-action="cancel_typist_send"
+              className="secondary"
+              onClick={() => void actions.run("cancel_typist_send")}
+            >
               Cancel
             </button>
-            <button className="primary" onClick={() => void send()}>
+            <button
+              data-action="send_to_typist"
+              className="primary"
+              onClick={() => void actions.run("send_to_typist")}
+            >
               Confirm and prepare
             </button>
           </div>
@@ -141,10 +240,30 @@ export default function TypistSendPage() {
           <h2>{bundle.count} reports ready</h2>
           <p>{bundle.filename}</p>
           <div className="share-grid">
-            <button onClick={download}>Download</button>
-            <button onClick={() => void share()}>Email</button>
-            <button onClick={() => void share()}>WhatsApp</button>
-            <button onClick={() => window.print()}>Print</button>
+            <button
+              data-action="download_typist_file"
+              onClick={() => void actions.run("download_typist_file")}
+            >
+              Download
+            </button>
+            <button
+              data-action="share_typist_file"
+              onClick={() => void actions.run("share_typist_file")}
+            >
+              Email
+            </button>
+            <button
+              data-action="share_typist_file"
+              onClick={() => void actions.run("share_typist_file")}
+            >
+              WhatsApp
+            </button>
+            <button
+              data-action="print_typist_file"
+              onClick={() => void actions.run("print_typist_file")}
+            >
+              Print
+            </button>
           </div>
         </section>
       )}
@@ -152,8 +271,10 @@ export default function TypistSendPage() {
         <DictationButton
           label="Say send all approved to typist"
           onTranscript={(text) => {
-            if (/confirm/i.test(text) && review) void send("voice");
-            else if (/send.*typist/i.test(text)) setReview(true);
+            if (/confirm/i.test(text) && review)
+              void actions.run("send_to_typist", {}, { source: "voice" });
+            else if (/send.*typist/i.test(text))
+              void actions.run("review_typist_send", {}, { source: "voice" });
             else setError("Say send all approved to typist, then confirm.");
           }}
         />

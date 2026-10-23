@@ -1,11 +1,14 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/app/components/ActionLink";
 import { useCallback, useEffect, useState } from "react";
+import { z } from "zod";
 import AppNav from "@/app/components/AppNav";
 import DictationButton from "@/app/components/DictationButton";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
+import { useRegisterActions } from "@/app/components/ActionProvider";
+import { defineAction, type AnyAction } from "@/lib/actions";
 
 type DiffRow = {
   field: string;
@@ -34,6 +37,7 @@ export default function TypistPage({ params }: { params: { id: string } }) {
   const [diff, setDiff] = useState<DiffRow[]>([]);
   const [overrideReason, setOverrideReason] = useState("");
   const [error, setError] = useState("");
+  const [overrideOpen, setOverrideOpen] = useState(false);
   const load = useCallback(async () => {
     const data = await apiFetch<Data>(`/api/cases/${params.id}/typist`);
     setItem(data);
@@ -92,16 +96,118 @@ export default function TypistPage({ params }: { params: { id: string } }) {
   function voice(text: string) {
     const lower = text.toLowerCase();
     if (lower.includes("confirm") || lower.includes("deliver"))
-      void deliver(undefined, "voice");
+      void actions.run("deliver_case", {}, { source: "voice" });
     else if (lower.includes("send back") && diff.some((row) => !row.matches))
-      void sendBack("voice");
-    else setTypedText((current) => (current ? `${current}\n${text}` : text));
+      void actions.run("send_back_typist", {}, { source: "voice" });
+    else
+      void actions.run(
+        "set_typed_report",
+        { text, append: true },
+        { source: "voice" },
+      );
   }
+  const screenActions: AnyAction[] = [
+    defineAction({
+      id: "open_override",
+      description: "Open or close delivery override controls.",
+      args: z.object({ open: z.boolean().optional() }),
+      screens: ["typist_check"],
+      risk: "safe",
+      describe: () => "Open delivery override",
+      run: ({ open }) => setOverrideOpen((current) => open ?? !current),
+    }),
+    defineAction({
+      id: "set_typed_report",
+      description: "Set or append typist report text.",
+      args: z.object({ text: z.string(), append: z.boolean().default(false) }),
+      screens: ["typist_check"],
+      risk: "safe",
+      describe: () => "Set typed report text",
+      run: ({ text, append }) =>
+        setTypedText((current) =>
+          append && current ? `${current}\n${text}` : text,
+        ),
+    }),
+    defineAction({
+      id: "enter_typist_review",
+      description: "Read typed report aloud before comparison.",
+      args: z.object({}),
+      screens: ["typist_check"],
+      risk: "safe",
+      describe: () => "Review typed report",
+      run: () => {
+        setReview(true);
+        window.speechSynthesis?.speak(new SpeechSynthesisUtterance(typedText));
+      },
+    }),
+    defineAction({
+      id: "edit_typist_report",
+      description: "Return to typist report editing.",
+      args: z.object({}),
+      screens: ["typist_check"],
+      risk: "safe",
+      describe: () => "Edit typed report",
+      run: () => setReview(false),
+    }),
+    defineAction({
+      id: "check_typist",
+      description: "Compare typed report with the approved report.",
+      args: z.object({}),
+      screens: ["typist_check"],
+      risk: "confirm",
+      describe: () => "Compare typed report",
+      run: (_args, ctx) => action("check_typist", { typedText }, ctx.source),
+    }),
+    defineAction({
+      id: "send_back_typist",
+      description: "Return listed corrections to typist.",
+      args: z.object({}),
+      screens: ["typist_check"],
+      risk: "confirm",
+      describe: () => "Send differences back to typist",
+      run: (_args, ctx) => sendBack(ctx.source),
+    }),
+    defineAction({
+      id: "set_override_reason",
+      description: "Set the delivery override reason.",
+      args: z.object({ reason: z.string() }),
+      screens: ["typist_check"],
+      risk: "safe",
+      describe: ({ reason: value }) => `Set override reason to ${value}`,
+      run: ({ reason: value }) => setOverrideReason(value),
+    }),
+    defineAction({
+      id: "deliver_case",
+      description:
+        "Deliver and lock a matching report, or use an override reason.",
+      args: z.object({ reason: z.string().optional() }),
+      screens: ["typist_check"],
+      risk: "confirm",
+      describe: ({ reason: value }) =>
+        value
+          ? `Override and deliver because ${value}`
+          : "Deliver and lock case",
+      run: ({ reason: value }, ctx) => deliver(value, ctx.source),
+    }),
+  ];
+  const actions = useRegisterActions("typist_check", screenActions, () => ({
+    screenId: "typist_check",
+    caseLabel: item?.caseLabel,
+    typedText,
+    mode: diff.length ? "comparison" : review ? "review" : "entry",
+    differences: diff.filter((row) => !row.matches).map((row) => row.label),
+    overrideReason,
+    modal: overrideOpen ? "delivery_override" : null,
+  }));
   if (!item) return <main className="app-shell">Loading…</main>;
   const differences = diff.filter((row) => !row.matches);
   return (
     <main className="app-shell">
-      <Link href={`/cases/${params.id}`} className="back">
+      <Link
+        data-action="navigate"
+        href={`/cases/${params.id}`}
+        className="back"
+      >
         ← Case
       </Link>
       <header>
@@ -120,12 +226,17 @@ export default function TypistPage({ params }: { params: { id: string } }) {
               <h3>Typed report read-back</h3>
               <pre className="typed-preview">{typedText}</pre>
               <div className="gross-actions">
-                <button className="secondary" onClick={() => setReview(false)}>
+                <button
+                  data-action="edit_typist_report"
+                  className="secondary"
+                  onClick={() => void actions.run("edit_typist_report")}
+                >
                   Edit
                 </button>
                 <button
                   className="primary"
-                  onClick={() => void action("check_typist", { typedText })}
+                  data-action="check_typist"
+                  onClick={() => void actions.run("check_typist")}
                 >
                   Confirm and compare
                 </button>
@@ -136,8 +247,13 @@ export default function TypistPage({ params }: { params: { id: string } }) {
               <label className="field-label">
                 Paste the typed report
                 <textarea
+                  data-action="set_typed_report"
                   value={typedText}
-                  onChange={(event) => setTypedText(event.target.value)}
+                  onChange={(event) =>
+                    void actions.run("set_typed_report", {
+                      text: event.target.value,
+                    })
+                  }
                   placeholder={
                     "Diagnosis: …\nGrade: …\nStage: …\nMargins: …\nLaterality: …\nTumour size: …"
                   }
@@ -146,20 +262,18 @@ export default function TypistPage({ params }: { params: { id: string } }) {
               <DictationButton
                 label="Dictate typed report"
                 onTranscript={(text) =>
-                  setTypedText((current) =>
-                    current ? `${current}\n${text}` : text,
+                  void actions.run(
+                    "set_typed_report",
+                    { text, append: true },
+                    { source: "voice" },
                   )
                 }
               />
               <button
                 className="primary wide"
+                data-action="enter_typist_review"
                 disabled={typedText.trim().length < 10}
-                onClick={() => {
-                  setReview(true);
-                  window.speechSynthesis?.speak(
-                    new SpeechSynthesisUtterance(typedText),
-                  );
-                }}
+                onClick={() => void actions.run("enter_typist_review")}
               >
                 Read back before comparing
               </button>
@@ -203,28 +317,49 @@ export default function TypistPage({ params }: { params: { id: string } }) {
               </p>
               <button
                 className="secondary wide"
-                onClick={() => void sendBack()}
+                data-action="send_back_typist"
+                onClick={() => void actions.run("send_back_typist")}
               >
                 Send back to typist
               </button>
-              <details className="override-box">
-                <summary>Override with a reason</summary>
+              <details className="override-box" open={overrideOpen}>
+                <summary
+                  data-action="open_override"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void actions.run("open_override");
+                  }}
+                >
+                  Override with a reason
+                </summary>
                 <textarea
+                  data-action="set_override_reason"
                   value={overrideReason}
-                  onChange={(event) => setOverrideReason(event.target.value)}
+                  onChange={(event) =>
+                    void actions.run("set_override_reason", {
+                      reason: event.target.value,
+                    })
+                  }
                   placeholder="Reason required"
                 />
                 <button
                   className="primary wide"
+                  data-action="deliver_case"
                   disabled={overrideReason.trim().length < 3}
-                  onClick={() => void deliver(overrideReason)}
+                  onClick={() =>
+                    void actions.run("deliver_case", { reason: overrideReason })
+                  }
                 >
                   Confirm override and deliver
                 </button>
               </details>
             </>
           ) : (
-            <button className="primary wide" onClick={() => void deliver()}>
+            <button
+              data-action="deliver_case"
+              className="primary wide"
+              onClick={() => void actions.run("deliver_case")}
+            >
               Confirm &amp; deliver
             </button>
           )}

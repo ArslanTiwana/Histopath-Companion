@@ -1,7 +1,11 @@
 "use client";
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { z } from "zod";
 import { apiFetch } from "@/lib/api-fetch";
 import { runConfirmedAction } from "@/lib/client-actions";
+import DictationButton from "@/app/components/DictationButton";
+import { useRegisterActions } from "@/app/components/ActionProvider";
+import { defineAction, type AnyAction } from "@/lib/actions";
 type Message = { role: "user" | "assistant"; content: string };
 export default function HelpPanel({
   caseId,
@@ -23,8 +27,6 @@ export default function HelpPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [source, setSource] = useState<"tap" | "voice">("tap");
-  const recorder = useRef<MediaRecorder | null>(null);
-  const chunks = useRef<Blob[]>([]);
   async function ask(question: string, nextSource: "tap" | "voice") {
     if (!question.trim()) return;
     setBusy(true);
@@ -52,49 +54,6 @@ export default function HelpPanel({
       setBusy(false);
     }
   }
-  async function startVoice() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const media = new MediaRecorder(stream);
-      recorder.current = media;
-      chunks.current = [];
-      media.ondataavailable = (event) => {
-        if (event.data.size) chunks.current.push(event.data);
-      };
-      media.onstop = async () => {
-        stream.getTracks().forEach((track) => track.stop());
-        setBusy(true);
-        const form = new FormData();
-        form.append(
-          "audio",
-          new Blob(chunks.current, { type: media.mimeType || "audio/webm" }),
-        );
-        try {
-          const result = await apiFetch<{
-            transcript?: string;
-            error?: string;
-          }>("/api/voice/transcribe", {
-            method: "POST",
-            body: form,
-          });
-          if (!result.transcript)
-            throw new Error(result.error || "I didn't catch that");
-          await ask(result.transcript, "voice");
-        } catch (cause) {
-          setError(
-            cause instanceof Error ? cause.message : "I didn't catch that",
-          );
-          setBusy(false);
-        }
-      };
-      media.start();
-      setBusy(true);
-    } catch {
-      setError(
-        "Microphone permission is required. Type your question instead.",
-      );
-    }
-  }
   async function close(addedNote?: string) {
     if (messages.length)
       await runConfirmedAction("save_help_session", {
@@ -110,6 +69,59 @@ export default function HelpPanel({
   const latestReply = [...messages]
     .reverse()
     .find((message) => message.role === "assistant")?.content;
+  const screenActions: AnyAction[] = [
+    defineAction({
+      id: "set_help_question",
+      description: "Set the contextual help question.",
+      args: z.object({ text: z.string() }),
+      screens: ["help"],
+      risk: "safe",
+      describe: ({ text: value }) => `Set help question to ${value}`,
+      run: ({ text: value }) => setText(value),
+    }),
+    defineAction({
+      id: "ask_help",
+      description: "Ask the contextual study-aid assistant.",
+      args: z.object({ question: z.string().optional() }),
+      screens: ["help"],
+      risk: "safe",
+      describe: ({ question }) => `Ask ${question || text}`,
+      run: ({ question }, ctx) => ask(question || text, ctx.source),
+    }),
+    defineAction({
+      id: "close_help",
+      description: "Close help without adding its answer to notes.",
+      args: z.object({}),
+      screens: ["help"],
+      risk: "confirm",
+      describe: () => "Close help",
+      run: () => close(),
+    }),
+    defineAction({
+      id: "add_help_answer",
+      description: "Add the latest help answer to notes and close.",
+      args: z.object({}),
+      screens: ["help"],
+      risk: "confirm",
+      describe: () => "Add the latest help answer to notes",
+      run: () => {
+        if (!latestReply) throw new Error("There is no help answer to add.");
+        return close(latestReply);
+      },
+    }),
+  ];
+  const actions = useRegisterActions(
+    `${contextStep}_help`,
+    screenActions,
+    () => ({
+      screenId: `${contextStep}_help`,
+      caseLabel,
+      currentText,
+      question: text,
+      latestReply,
+      modal: "help",
+    }),
+  );
   return (
     <div className="help-overlay">
       <section className="help-panel">
@@ -121,7 +133,11 @@ export default function HelpPanel({
               {caseLabel}
             </h2>
           </div>
-          <button className="close" onClick={() => void close()}>
+          <button
+            data-action="close_help"
+            className="close"
+            onClick={() => void actions.run("close_help")}
+          >
             ×
           </button>
         </div>
@@ -146,28 +162,36 @@ export default function HelpPanel({
             event.preventDefault();
             const value = text;
             setText("");
-            void ask(value, "tap");
+            void actions.run("ask_help", { question: value });
           }}
           className="help-input"
         >
           <textarea
+            data-action="set_help_question"
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) =>
+              void actions.run("set_help_question", {
+                text: event.target.value,
+              })
+            }
             placeholder="Describe what you see or ask a question…"
           />
           <div className="gross-actions">
-            <button
-              type="button"
-              className="voice-answer"
-              onClick={() =>
-                busy && recorder.current?.state === "recording"
-                  ? recorder.current.stop()
-                  : void startVoice()
+            <DictationButton
+              label="Ask by voice"
+              onTranscript={(value) =>
+                void actions.run(
+                  "ask_help",
+                  { question: value },
+                  { source: "voice" },
+                )
               }
+            />
+            <button
+              data-action="ask_help"
+              className="primary"
+              disabled={busy || !text.trim()}
             >
-              {busy ? "■ Stop" : "🎙 Ask by voice"}
-            </button>
-            <button className="primary" disabled={busy || !text.trim()}>
               Ask
             </button>
           </div>
@@ -175,12 +199,17 @@ export default function HelpPanel({
         {latestReply && (
           <button
             className="secondary wide"
-            onClick={() => void close(latestReply)}
+            data-action="add_help_answer"
+            onClick={() => void actions.run("add_help_answer")}
           >
             Add answer to notes and close
           </button>
         )}
-        <button className="secondary wide" onClick={() => void close()}>
+        <button
+          data-action="close_help"
+          className="secondary wide"
+          onClick={() => void actions.run("close_help")}
+        >
           Close without adding
         </button>
         {error && <div className="error">{error}</div>}
